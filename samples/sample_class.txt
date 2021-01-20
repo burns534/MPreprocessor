@@ -1,0 +1,11 @@
+class SampleClass {
+    int p;
+    SampleClass test;
+
+    unsigned long get_value() {
+        const char *message = "this is a string literal";
+        return 41;
+    }
+}
+
+SampleClass external_declaration;

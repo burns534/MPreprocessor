@@ -1,0 +1,17 @@
+class Person {
+    int uid;
+    int age;
+    const char *first_name;
+    const char *last_name;
+}
+
+/*
+
+->>>>
+typedef struct {
+    int uid;
+    int age;
+    const char *first_name;
+    const char *last_name;
+} _Person{0-9}*;
+*/
