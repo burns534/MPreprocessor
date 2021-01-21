@@ -4,7 +4,7 @@ Preprocessor adding protocol oriented programming and objects to C
 This program will function as a compiler for a language I've developed which is a superset of C (I haven't named it yet).
 
 The language supports protocol oriented programming, access specifiers, classes, single inheritance with a universal base class similar to 
-NSObject in Objective-C, and single file class definitions.
+NSObject in Objective-C, and requires method definitions inside of class definitions similar to Swift or Python.
 
 The language was influenced by Python's use of PyObject for heterogenous containers, Python's powerful native types, Swift's classes and protocols, and C++'s syntax.
 
