@@ -6,9 +6,6 @@
 //
 // need to have a token deinit that frees the strings stored
 // look into bitwise NOT ~ later
-// FIXME: LOOK FOR SIZEOF
-// investigate typename issue also
-// currently an issue with lexer returning incorrect number of tokens and or not catching the closing bracket...
 #include "lexer.h"
 
 // 41 items 32 standard + 9 custom keywords
@@ -136,7 +133,7 @@ MToken ** lex(FILE *fp, size_t *count) {
     int macroMode = 1;
     // string token i.e. type definition must be followed by space. c will hold that space at the end of this loop
     while(!feof(fp) && macroMode) {
-        // printf("macromode c: %c\n", c);
+        printf("macromode c: %c\n", c);
         if (c == '/') {
             c = fgetc(fp);
             if (c == '*') comment(fp, 0);

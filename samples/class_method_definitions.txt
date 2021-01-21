@@ -1,0 +1,19 @@
+typedef unsigned long size_t;
+class Book {
+    size_t uid, page_count;
+    const char *author, publisher;
+
+    const char * get_author() {
+        return author;
+    }
+    void set_author(const char *name) {
+        author = name;
+    }
+}
+
+int main(int argc, char **argv) {
+    Book test; // should call initializer
+    test.set_author("Robert Frost");
+    printf("%s\n", test.get_author());
+    return 0;
+}

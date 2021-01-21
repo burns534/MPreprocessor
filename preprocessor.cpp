@@ -13,14 +13,34 @@ static void error(const char *message) {
     perror(message);
     exit(EXIT_FAILURE);
 }
+// will need to be changed
+static std::string unique_function_identifier(std::string scope, std::string identifier, std::vector<Parameter> params) {
+    std::string result = "_" + scope + "_" + identifier;
+    for (size_t i = 0; i < params.size(); i++) {
+        for (size_t j = 0; j < params[i].specifiers.size(); j++) {
+            result.push_back('_');
+            result += params[i].specifiers[j]->value;
+        }
+    }
+    return result;
+}
+
+static std::string unique_function_identifier(std::string scope, std::string identifier, std::vector<std::string> arguments) {
+    std::string result = "_" + scope + "_" + identifier;
+    for (size_t i = 0; i < arguments.size(); i++) {
+        result += "_" + arguments[i];
+    }
+    return result;
+}
 
 Parameter::Parameter(std::string identifier, std::vector<MToken *>specifiers) {
     this->name = identifier;
     this->specifiers = specifiers;
 }
 
-Function::Function(std::vector<MToken *> specifiers, std::string identifier, std::vector<Parameter> params, std::string body) {
-    this->body = body;
+Function::Function(std::string scope, std::vector<MToken *> specifiers, std::string identifier, std::vector<Parameter> params, std::vector<MToken *> body_tokens) {
+    this->scope = scope;
+    this->body_tokens = body_tokens;
     this->identifier = identifier;
     this->params = params;
     this->specifiers = specifiers;
@@ -34,19 +54,15 @@ void Function::print() {
     }
 }
 
-std::string Function::generate_call(std::vector<std::string> arguments) {
-    std::string result = identifier + "(";
-    assert(arguments.size() == params.size());
-    for (size_t i = 0; i < arguments.size(); i++) {
-        result += arguments[i] + (i < arguments.size() - 1 ? ", " : "");
-    }
-    result += ") {";
-    if (body.compare("") != 0) {
-        result += body;
-    }
-    result.push_back('}');
-    return result;
-}
+// std::string Function::generate_call(std::vector<std::string> arguments) {
+//     std::string result = identifier + "(";
+//     assert(arguments.size() == params.size());
+//     for (size_t i = 0; i < arguments.size(); i++) {
+//         result += arguments[i] + (i < arguments.size() - 1 ? ", " : "");
+//     }
+//     result.push_back(')');
+//     return result;
+// }
 
 
 Preprocessor::Preprocessor(std::string filename) {
@@ -67,19 +83,88 @@ Preprocessor::Preprocessor(std::string filename) {
 // have to do a preliminary pass to gather user-defined types
 // second pass to gather type info for variables
 void Preprocessor::process(std::string outfile) {
-    first_pass();
-    second_pass();
-    std::string result, temp;
+    first_pass(); // gather user defined types
+    second_pass(); // gather type info for all variables
+    std::string class_definition_string, result, scope, temp;
     std::stack<std::string> class_scope;
-    // third pass
+    // third pass - replace class definitions with appropriate code
     for(cursor = 0;cursor < tokenCount; cursor++) {
         if (!(temp = class_declaration()).empty()) {
-            result += temp + "\n";
-        }
+            class_definition_string += temp + "\n";
+        } 
     }
 
+    std::vector<MToken *> specifiers;
+    Function * function_ptr = nullptr;
+    // replace variable and method usage with appropriate name and pointers
+    for (cursor = 0; cursor < tokenCount; cursor++) {
+        if (tokens[cursor]->type == IDENTIFIER) {
+            std::string scope, identifier, variable_identifier = tokens[cursor]->value;
+            // 2 cases
+            if (tokens[cursor + 1]->type == PTR_OP && tokens[cursor + 2]->type == IDENTIFIER) {
+                identifier = tokens[cursor + 2]->value;
+                scope = variable_scope[variable_identifier];
+                std::vector<std::string> arguments;
+                // function
+                if (tokens[cursor + 3]->type == '(') {
+                    for(cursor += 3; tokens[cursor]->type != ')' && cursor < tokenCount; cursor++) {
+                        if (tokens[cursor]->type == IDENTIFIER) {
+                            arguments.push_back(tokens[cursor]->value);
+                        }
+                    }
+
+                    // generate full method identifier and make sure it's valid
+                    identifier = unique_function_identifier(scope, identifier, arguments);
+                    if (function_info[identifier]) {
+                        result += identifier + "(" + variable_identifier;
+                        for (size_t j = 0; j < arguments.size(); j++) {
+                            result += ", " + arguments[j];
+                        }
+                    } else {
+                        error("Invalid method identifier");
+                    }
+                } else { // variable
+                    result += identifier;
+                }
+            } else if (tokens[cursor + 1]->type == '.' && tokens[cursor + 2]->type == IDENTIFIER) {
+                identifier = tokens[cursor + 2]->value;
+                scope = variable_scope[variable_identifier];
+                std::vector<std::string> arguments;
+                // function
+                if (tokens[cursor + 3]->type == '(') {
+                    for(cursor += 3; tokens[cursor]->type != ')' && cursor < tokenCount; cursor++) {
+                        if (tokens[cursor]->type == IDENTIFIER) {
+                            arguments.push_back(tokens[cursor]->value);
+                        }
+                    }
+
+                    // generate full method identifier and make sure it's valid
+                    identifier = unique_function_identifier(scope, identifier, arguments);
+                    if (function_info[identifier]) {
+                        result += identifier + "(&" + variable_identifier;
+                        for (size_t j = 0; j < arguments.size(); j++) {
+                            result += ", " + arguments[j];
+                        }
+                    } else {
+                        error("Invalid method identifier");
+                    }
+                } else { // variable
+                    cursor += 2;
+                    result.push_back(' ');
+                    result += identifier;
+                }
+            }
+        } else if (tokens[cursor]->type == TYPE_NAME) {
+            // add static handling here
+        } else {
+            result.push_back(' ');
+            result += tokens[cursor]->value;
+        }
+    }
+    std::string output = class_definition_string + result;
+    // need to make lexer lex a string, not just a file
     FILE *fp = fopen(outfile.c_str(), "w+");
-    fwrite(result.c_str(), 1, result.length(), fp);
+    fwrite(output.c_str(), 1, output.length(), fp);
     fclose(fp);
 }
 // forget this for now
@@ -189,14 +274,34 @@ std::string Preprocessor::class_item(std::string class_name) {
                 specifiers[i]->print();
             #endif
         }
-        result += identifier;
-
         // distinguish between variable dec, variable def, or function def
         if (accept(';')) { // variable declaration
+            result += identifier;
+            variable_scope[identifier] = class_name;
+            printf("variable: scope -> %s: %s\n", identifier.c_str(), class_name.c_str());
+            return result + ";";
+        } else if (accept(',')) {
+            result += identifier;
+            variable_scope[identifier] = class_name;
+            printf("variable: scope -> %s: %s\n", identifier.c_str(), class_name.c_str());
+            for (;cursor < tokenCount; cursor++) {
+                if (accept(';')) {
+                    break;
+                } else if (tokens[cursor]->type == IDENTIFIER) {
+                    variable_scope[tokens[cursor]->value] = class_name;
+                    result += ", ";
+                    result += tokens[cursor]->value;
+                } else if (tokens[cursor]->type == ',') {
+                    continue;
+                } else {
+                    error("Invalid token in variable declaration list");
+                }
+            }
             return result + ";";
         } else if (accept('(')) { // function definition
             std::vector<Parameter> params = parameter_list();
-            std::string parameter_string;
+            std::string parameter_string = class_name + " *self";
+            if (!params.empty()) parameter_string += ", ";
             for (size_t i = 0; i < params.size(); i++) {
                 for (size_t j = 0; j < params[i].specifiers.size(); j++) {
                     parameter_string += params[i].specifiers[j]->value;
@@ -206,9 +311,9 @@ std::string Preprocessor::class_item(std::string class_name) {
                 parameter_string += i < params.size() - 1 ? ", " : "";
             }
             if (accept(')') && accept('{')) {
-                // get body
+                // get body tokens
                 size_t open_brack_count = 1;
-                std::string body;
+                std::vector<MToken *> body_tokens;
                 while(1) {
                     if (accept('{')) {
                         open_brack_count++;
@@ -217,13 +322,13 @@ std::string Preprocessor::class_item(std::string class_name) {
                             break;
                         }
                     } else {
-                        body += " ";
-                        body += tokens[cursor++]->value;
+                        body_tokens.push_back(tokens[cursor++]);
                     }
                 }
-                printf("body: %s\n", body.c_str());
-                function_lookup_table[class_name][identifier] = new Function(specifiers, identifier, params, body);
-                result += "(" + parameter_string + ") {" + body + "}\n";
+                result += unique_function_identifier(class_name, identifier, params);
+                Function *function = new Function(class_name, specifiers, identifier, params, body_tokens);
+                function_info[unique_function_identifier(class_name, identifier, params)] = function;
+                result += "(" + parameter_string + ") {" + generate_function_body(function) + "}\n";
                 return result;
             } else {
                 error("Error: Syntax error in function definition");
@@ -416,8 +521,8 @@ void Preprocessor::second_pass() {
         std::vector<MToken *> specifiers = declaration_specifiers();
         std::string identifier;
         if (accept(IDENTIFIER)) {
-            if (accept(';') || accept('=')) {
-                identifier = tokens[cursor - 2]->value;
+            identifier = tokens[cursor - 1]->value;
+            if (accept(';') || accept('=') || accept(',')) {
                 if (specifiers.size() > 0) {
                     std::string type;
                     for (size_t i = 0; i < specifiers.size(); i++) {
@@ -427,6 +532,18 @@ void Preprocessor::second_pass() {
                         }
                     }
                     variable_types[identifier] = type;
+
+                    if (tokens[cursor - 1]->type == ',') {
+                        for (;cursor < tokenCount; cursor++) {
+                            if (tokens[cursor]->type == IDENTIFIER) {
+                                variable_types[tokens[cursor]->value] = type;
+                            } else if (tokens[cursor]->type == ',') {
+                                continue;
+                            } else {
+                                break;
+                            }
+                        }
+                    }
                     continue;
                 }
             }
@@ -449,10 +566,105 @@ std::string Preprocessor::replaced_function_call(std::string scope) {
     Function * func;
     if (accept(IDENTIFIER)) {
         std::string func_name = tokens[cursor - 1]->value;
-        if ((func = function_lookup_table[scope][func_name])) {
+    }
+    return result;
+}
+// this needs a lot of work....
+// first need to check for . operator and -> operator followed by identifier
+// then check for just identifier
+std::string Preprocessor::generate_function_body(Function *function) {
+    std::string result;
+    for (size_t i = 0; i < function->body_tokens.size(); i++) {
+        printf("token: %s\n", function->body_tokens[i]->value);
+        if (function->body_tokens[i]->type == IDENTIFIER) {
+            Function *method_ptr;
+            std::string scope, identifier, variable_identifier = function->body_tokens[i]->value;
+            // 3 cases
+            if (function->body_tokens[i + 1]->type == PTR_OP && function->body_tokens[i + 2]->type == IDENTIFIER) {
+                identifier = function->body_tokens[i + 2]->value;
+                scope = variable_scope[variable_identifier];
+                std::vector<std::string> arguments;
+                // function
+                if (function->body_tokens[i + 3]->type == '(') {
+                    for(i += 3; function->body_tokens[i]->type != ')' && i < function->body_tokens.size(); i++) {
+                        if (function->body_tokens[i]->type == IDENTIFIER) {
+                            arguments.push_back(function->body_tokens[i]->value);
+                        }
+                    }
 
+                    // generate full method identifier and make sure it's valid
+                    identifier = unique_function_identifier(scope, identifier, arguments);
+                    if (function_info[identifier]) {
+                        result += identifier + "(" + variable_identifier;
+                        for (size_t j = 0; j < arguments.size(); j++) {
+                            result += ", " + arguments[j];
+                        }
+                    } else {
+                        error("Invalid method identifier");
+                    }
+                } else { // variable
+                    result += identifier;
+                }
+            } else if (function->body_tokens[i + 1]->type == '.' && function->body_tokens[i + 2]->type == IDENTIFIER) {
+                identifier = function->body_tokens[i + 2]->value;
+                scope = variable_scope[variable_identifier];
+                std::vector<std::string> arguments;
+                // function
+                if (function->body_tokens[i + 3]->type == '(') {
+                    for(i += 3; function->body_tokens[i]->type != ')' && i < function->body_tokens.size(); i++) {
+                        if (function->body_tokens[i]->type == IDENTIFIER) {
+                            arguments.push_back(function->body_tokens[i]->value);
+                        }
+                    }
+
+                    // generate full method identifier and make sure it's valid
+                    identifier = unique_function_identifier(scope, identifier, arguments);
+                    if (function_info[identifier]) {
+                        result += identifier + "(&" + variable_identifier;
+                        for (size_t j = 0; j < arguments.size(); j++) {
+                            result += ", " + arguments[j];
+                        }
+                    } else {
+                        error("Invalid method identifier");
+                    }
+                } else { // variable
+                    i += 2;
+                    result += identifier;
+                }
+            } else if (variable_scope[variable_identifier] == function->scope) {
+                result += "self->" + variable_identifier; // this might not always work
+            } else if (function->body_tokens[i + 1]->type == '(') {
+                std::vector<std::string> arguments;
+                // gather parameters
+                for(i += 1; function->body_tokens[i]->type != ')' && i < function->body_tokens.size(); i++) {
+                    if (function->body_tokens[i]->type == IDENTIFIER) {
+                        arguments.push_back(function->body_tokens[i]->value);
+                    }
+                }
+
+                // generate full method identifier and make sure it's valid
+                identifier = unique_function_identifier(scope, identifier, arguments);
+                if (function_info[identifier]) {
+                    result += identifier + "(self";
+                    for (size_t j = 0; j < arguments.size(); j++) {
+                        result += ", " + arguments[j];
+                    }
+                } else {
+                    error("Invalid method identifier");
+                }
+            } else {
+                result += variable_identifier;
+            }
+        } else if (function->body_tokens[i]->type == SELF) {
+            // the same as identifier
+        } else if (function->body_tokens[i]->type == SUPER) {
+
+        } else if (function->body_tokens[i]->type == TYPE_NAME) {
+            // case for static members
         } else {
-
+            result += function->body_tokens[i]->value;
+            result.push_back(' ');
         }
     }
+    return result;
 }

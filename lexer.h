@@ -20,6 +20,7 @@
 #define DEFAULT_STRING_BUFFER_LENGTH 128
 
 MToken ** lex(FILE *, size_t *);
+MToken ** lex(const char *string, size_t *token_count);
 const char * stringRepresentation(MToken *);
 
 #endif /* Lexer_h */

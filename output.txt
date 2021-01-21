@@ -1,0 +1,3 @@
+const char * _Book_get_author(Book *self) {return self->author; }
+void _Book_set_authorconst_char_*_(Book *self, const char * name) {self->author= name; }
+typedef struct {size_t uid, page_count;const char * author, publisher;} _Book;

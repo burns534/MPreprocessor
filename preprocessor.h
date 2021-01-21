@@ -18,12 +18,13 @@ enum ItemType {
 };
 
 struct Function {
+    std::string scope;
     std::vector<MToken *> specifiers;
     std::string identifier;
-    std::string body;
+    std::vector<MToken *> body_tokens;
     std::vector<Parameter> params;
-    Function(std::vector<MToken *> specifiers, std::string identifier, std::vector<Parameter> params, std::string body);
-    std::string generate_call(std::vector<std::string> arguments);
+    Function(std::string scope, std::vector<MToken *> specifiers, std::string identifier, std::vector<Parameter> params, std::vector<MToken *> body_tokens);
+    // std::string generate_call(std::vector<std::string> arguments);
     void print();
 };
 
@@ -43,25 +44,28 @@ private:
     int accept(int token);
     void unaccept();
     void first_pass(); // gathers all user defined types
-    void second_pass(); // gathers type info for all variables
+    void second_pass(); // gathers type info for all variables. As string?
     std::string replaced_function_call(std::string scope);
-    std::string is_function_definition();
+    // std::string is_function_definition();
+    std::string generate_function_body(Function *function);
     MToken **tokens;
     size_t tokenCount, cursor;
     // map from class name to hash
+    // this shouldn't be necessary with a good hash function
     std::map<std::string, std::string> class_name_table;
-    // map from class name to map from function name to function struct
-    std::map<std::string, std::map<std::string, Function *> > function_lookup_table;
+    // map from class method hashed identifier to function info
+    std::map<std::string, Function *> function_info;
+    // the following tw0 could be cleaned up with variable struct
+    // map from variable name to variable class scope
+    std::map<std::string, std::string> variable_scope;
     // map from variable name to variable type
     std::map<std::string, std::string> variable_types;
+    // mapping from identifier to class owner name - could be added to the function struct I think
+    std::map<std::string, std::string> private_identifiers;
     // set of user defined type names used for determining if type is udt
-    std::set<std::string> user_defined_types;
-    // mapping from identifier to class owner name
-    std::map<std::string, std::string> private_identifiers; 
+    std::set<std::string> user_defined_types; 
     // mapping from class identifier to super class identifier
     std::map<std::string, std::string> super_class;
-    // mapping from function identifier to class scope
-    std::map<std::string, std::string> function_call_class_scope;
     // may need to change this later
     // mapping from class identifier to list of protocol identifiers
     std::map<std::string, std::vector<std::string> > protocol;

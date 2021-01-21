@@ -8,9 +8,15 @@
 #include <iostream>
 
 int main(int argc, char **argv) {
-    std::string filename;
-    if (argc == 2) filename = std::string(argv[1]);
-    Preprocessor test = Preprocessor(filename);
-    test.process("output.txt");
+    std::string filename, outfile;
+    if (argc > 1) {
+        filename = argv[1];
+        outfile = argv[2];
+    } else {
+        std::cerr << "Error: insufficient arguments\n";
+        exit(EXIT_FAILURE);
+    }
+    Preprocessor test = Preprocessor(filename + ".txt");
+    test.process(outfile);
     return 0;
 }
