@@ -6,6 +6,8 @@ This program will function as a compiler for a language I've developed which is 
 The language supports protocol oriented programming, access specifiers, classes, single inheritance with a universal base class similar to 
 NSObject in Objective-C, and requires method definitions inside of class definitions similar to Swift or Python.
 
+The language achieves compile time polymorphism through a series of tables comparable to a vtable in C++.
+
 The language was influenced by Python's use of PyObject for heterogenous containers, Python's powerful native types, Swift's classes and protocols, and C++'s syntax.
 
 The implementation is essentially a pre processor which converts the supplied files into valid C code and pipes the output to the gcc c compiler.
