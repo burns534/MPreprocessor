@@ -85,9 +85,8 @@ void Preprocessor::process(std::string outfile) {
     for(cursor = 0; cursor < tokenCount; cursor++) {
         if (!(temp = class_declaration()).empty()) {
             class_definition_string += temp + "\n";
-        } else {
-            new_tokens.push_back(tokens[cursor]);
-        }
+        } 
+        new_tokens.push_back(tokens[cursor]);
     }
 
     std::vector<MToken *> specifiers;
@@ -101,7 +100,7 @@ void Preprocessor::process(std::string outfile) {
             if ((type == PTR_OP || type == '.') && new_tokens[cursor + 2]->type == IDENTIFIER) {
                 identifier = new_tokens[cursor + 2]->value;
                 printf("\n\nit happed with identifier: %s\n", identifier.c_str());
-                scope = variable_scope[variable_identifier];
+                scope = variable_types[variable_identifier];
                 if (scope.empty()) {
                     result += variable_identifier;
                     continue;
@@ -255,23 +254,23 @@ std::string Preprocessor::class_item(std::string class_name, bool *outside_class
         // distinguish between variable dec, variable def, or function def
         if (accept(';')) { // variable declaration
             result += " " + identifier;
-            variable_scope[identifier] = class_name;
+            variable_types[identifier] = class_name;
             printf("variable: scope -> %s: %s\n", identifier.c_str(), class_name.c_str());
             return result + ";\n";
         } else if (accept(',')) {
             result += " " + identifier;
-            variable_scope[identifier] = class_name;
+            variable_types[identifier] = class_name;
             printf("variable: scope -> %s: %s\n", identifier.c_str(), class_name.c_str());
             for (;cursor < tokenCount; cursor++) {
                 if (accept(';')) {
                     break;
                 } else if (tokens[cursor]->type == '*') {
                     assert(tokens[++cursor]->type == IDENTIFIER);
-                    variable_scope[tokens[cursor]->value] = class_name;
+                    variable_types[tokens[cursor]->value] = class_name;
                     result += ", *";
                     result += tokens[cursor]->value;
                 } else if (tokens[cursor]->type == IDENTIFIER) {
-                    variable_scope[tokens[cursor]->value] = class_name;
+                    variable_types[tokens[cursor]->value] = class_name;
                     result += ", ";
                     result += tokens[cursor]->value;
                 } else if (tokens[cursor]->type == ',') {
@@ -314,7 +313,7 @@ std::string Preprocessor::class_item(std::string class_name, bool *outside_class
                 // original scope here as well
                 method_name = unique_function_identifier(class_name, identifier, params);
                 printf("method_name: %s\n", method_name.c_str());
-                result += method_name + " ";
+                result += " " + method_name;
                 // original scope
                 Function *function = new Function(class_name, specifiers, identifier, params, body_tokens);
                 function_info[method_name] = function;
@@ -602,7 +601,7 @@ std::string Preprocessor::generate_function_body(Function *function) {
             if ((type == PTR_OP || type == '.') && function->body_tokens[i + 2]->type == IDENTIFIER) {
                 identifier = function->body_tokens[i + 2]->value;
                 // original class name
-                scope = variable_scope[variable_identifier];
+                scope = variable_types[variable_identifier];
                 std::vector<std::string> arguments;
                 std::vector<std::string> argument_types;
                 // gather parameters
@@ -624,7 +623,7 @@ std::string Preprocessor::generate_function_body(Function *function) {
                     result += variable_identifier + (PTR_OP ? "->" : ".") + identifier + " ";
                 }
                 // good
-            } else if (variable_scope[variable_identifier] == function->scope) {
+            } else if (variable_types[variable_identifier] == function->scope) {
                 result += "self->" + variable_identifier; // this might not always work
             } else if (function->body_tokens[i + 1]->type == '(') {
                 std::vector<std::string> arguments;
