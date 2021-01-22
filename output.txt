@@ -1,4 +1,10 @@
-const char * _Book_get_author(Book *self) {return self->author; }
-void _Book_set_author_const_char_*(Book *self, const char * name) {self->author= name; }
-typedef struct {size_t uid, page_count;const char * author, publisher;} _Book;
-typedef unsigned long size_t ; main ( int argc , char * * argv ) { Book test ; _Book_set_author_const_char_*(test, "Robert Frost"); printf ( "%s\n" , _Book_get_author(test)) ; return 0 ; } 
+#define bool int
+#define true 1
+#define false 0
+const char *_Book_get_author (_Book *self) {return self->author; }
+void_Book_set_author_const_char_* (_Book *self, const char *name) {_Book test ; self->author= name ; }
+typedef struct {
+size_t uid, page_count;
+const char * author, *publisher;
+}_Book;
+typedef unsigned long size_t ; main( int argc, char **argv) { _Book test; test. set_author( "Robert Frost" ) ; printf( "%s\n" , test. get_author( ) ) ; return 0 ; } 

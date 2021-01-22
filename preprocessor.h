@@ -32,7 +32,7 @@ struct Preprocessor {
     Preprocessor(std::string);
     void process(std::string);
     std::string class_declaration();
-    std::string class_item(std::string super_class);
+    std::string class_item(std::string super_class, bool *outside_class_body);
     std::string initializer();
     std::string deinitializer();
     std::vector<MToken *> declaration_specifiers();
@@ -45,26 +45,20 @@ private:
     void unaccept();
     void first_pass(); // gathers all user defined types
     void second_pass(); // gathers type info for all variables. As string?
-    std::string replaced_function_call(std::string scope);
     void collect_function_arguments(size_t &i, std::vector<MToken *> tokens, std::vector<std::string> *arguments, std::vector<std::string> *argument_types);
     std::string generate_function_body(Function *function);
     MToken **tokens;
     size_t tokenCount, cursor;
-    // map from class name to hash
-    // this shouldn't be necessary with a good hash function
-    std::map<std::string, std::string> class_name_table;
     // map from class method hashed identifier to function info
     std::map<std::string, Function *> function_info;
-    // the following tw0 could be cleaned up with variable struct
-    // map from variable name to variable class scope
+    // the following two could be cleaned up with variable struct
+    // map from variable name to variable class scope (original)
     std::map<std::string, std::string> variable_scope;
     // map from variable name to variable type
     std::map<std::string, std::string> variable_types;
-    // mapping from identifier to class owner name - could be added to the function struct I think
+    // mapping from identifier to original class owner name
     std::map<std::string, std::string> private_identifiers;
-    // set of user defined type names used for determining if type is udt
-    std::set<std::string> user_defined_types; 
-    // mapping from class identifier to super class identifier
+    // mapping from class identifier to super class identifier (original)
     std::map<std::string, std::string> super_class;
     // may need to change this later
     // mapping from class identifier to list of protocol identifiers

@@ -44,6 +44,7 @@ typedef enum {
     OR_ASSIGN,
     ELLIPSES,
     TYPE_NAME,
+    CLASS_NAME,
     // storage modifiers
     TYPEDEF,
     EXTERN,

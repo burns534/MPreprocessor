@@ -9,11 +9,11 @@
 
 int main(int argc, char **argv) {
     std::string filename, outfile;
-    if (argc > 1) {
+    if (argc > 2) {
         filename = argv[1];
         outfile = argv[2];
     } else {
-        std::cerr << "Error: insufficient arguments\n";
+        std::cout<< "Error: insufficient arguments\n";
         exit(EXIT_FAILURE);
     }
     Preprocessor test = Preprocessor(filename + ".txt");

@@ -1,12 +1,13 @@
 typedef unsigned long size_t;
 class Book {
     size_t uid, page_count;
-    const char *author, publisher;
+    const char *author, *publisher;
 
     const char * get_author() {
         return author;
     }
     void set_author(const char *name) {
+        Book test;
         author = name;
     }
 }

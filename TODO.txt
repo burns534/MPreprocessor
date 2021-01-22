@@ -1,0 +1,13 @@
+Version 0
+- Add parse procedure for initializers/deinitializers
+- Add scope management and object initialization code replacement
+- Add native support for string, list, map, and set types
+
+Version 1
+- Add default values for instance members
+- Add support for '.' and PTR_OP chaining (embarrassing oversight)
+- Fix parameter type inference with numeric constants.
+Currently they are distinguished only between integer and double.
+This means that functions can only define int or double as numeric argument types.
+- Add native file I/O support
+- Finish implementing support for static members (trivial)
