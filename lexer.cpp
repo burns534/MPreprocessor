@@ -87,10 +87,11 @@ static MToken * stringLiteral(FILE *fp, char *c) {
     char *buffer = (char *) malloc(DEFAULT_STRING_BUFFER_LENGTH);
     size_t bufferSize = DEFAULT_STRING_BUFFER_LENGTH;
     *c = fgetc(fp);
-    size_t i = 0;
+    size_t i = 1;
+    *buffer = 34;
     for(; !feof(fp) && *c != 34; i++) {
         // printf("string literal with c/string: %c/%s\n", *c, buffer);
-        if (i > 0.6 * bufferSize) {
+        if (i > 0.5 * bufferSize) {
             bufferSize *= 4;
             buffer = (char *) realloc(buffer, 8 * bufferSize);
         }
@@ -102,6 +103,7 @@ static MToken * stringLiteral(FILE *fp, char *c) {
         buffer[i] = *c;
         *c = fgetc(fp);
     }
+    buffer[i] = 34;
     buffer[i + 1] = 0;
     return new MToken(STRING_LITERAL, buffer);
 }

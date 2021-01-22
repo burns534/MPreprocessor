@@ -46,7 +46,7 @@ private:
     void first_pass(); // gathers all user defined types
     void second_pass(); // gathers type info for all variables. As string?
     std::string replaced_function_call(std::string scope);
-    // std::string is_function_definition();
+    void collect_function_arguments(size_t &i, std::vector<MToken *> tokens, std::vector<std::string> *arguments, std::vector<std::string> *argument_types);
     std::string generate_function_body(Function *function);
     MToken **tokens;
     size_t tokenCount, cursor;
