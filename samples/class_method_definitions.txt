@@ -1,3 +1,5 @@
+#include <stdio.h>
+#define _M_END_PREPROCESSOR 1
 typedef unsigned long size_t;
 class Book {
     size_t uid, page_count;
@@ -10,6 +12,10 @@ class Book {
         Book test;
         author = name;
     }
+}
+
+class Dictionary: Book {
+    double reading_level;
 }
 
 int main(int argc, char **argv) {

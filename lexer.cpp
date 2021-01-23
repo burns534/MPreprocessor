@@ -62,14 +62,13 @@ static MToken * numToken(FILE *fp, char *c) {
     return NULL;
 }
 // fp needs to be advanced after this function
-static MToken * stringToken(FILE *fp, char *c, int * macroMode) {
+static MToken * stringToken(FILE *fp, char *c) {
     char *stringBuffer = (char *) malloc(MAX_IDENTIFIER_LENGTH);
     for (size_t i = 0; !feof(fp) && i < MAX_IDENTIFIER_LENGTH; i++) {
         // printf("stringToken with c/string: %c/%s\n", *c, stringBuffer);
         if (!isalnum(*c) && *c != '_') {
             int index = isKeyword(stringBuffer);
             if (index >= 0) {
-                *macroMode = 0;
                 return new MToken(getTokenType(index), stringBuffer);
             } else {
                 stringBuffer[i] = 0;
@@ -127,30 +126,49 @@ static void comment(FILE *fp, int lineComment) {
     return;
 }
 
-MToken ** lex(FILE *fp, size_t *count) {
+MToken ** lex(FILE *fp, size_t *count, std::string *macro_text) {
     size_t bufferSize = DEFAULT_TOKEN_BUFFER_SIZE;
     *count = -1;
     MToken ** buffer = (MToken **) malloc(bufferSize * 8);
-    char c = fgetc(fp);
-    int macroMode = 1;
+    char c;
+    // int macroMode = 1;
     // string token i.e. type definition must be followed by space. c will hold that space at the end of this loop
-    while(!feof(fp) && macroMode) {
-        printf("macromode c: %c\n", c);
-        if (c == '/') {
-            c = fgetc(fp);
-            if (c == '*') comment(fp, 0);
-            else if (c == '/') comment(fp, 1);
-            else error("Erroneous '/'");
+    // while(!feof(fp) && macroMode) {
+    //     printf("macromode c: %c\n", c);
+    //     if (c == '/') {
+    //         c = fgetc(fp);
+    //         if (c == '*') comment(fp, 0);
+    //         else if (c == '/') comment(fp, 1);
+    //         else error("Erroneous '/'");
+    //     }
+    //     if (isalnum(c)) {
+    //         MToken * result = stringToken(fp, &c, &macroMode);
+    //         if (!macroMode) {
+    //             buffer[++*count] = result;
+    //             printf("got string token with count: %s/%lu\n", result->value, *count);
+    //             break; // note this
+    //         } else {
+    //             *macro_text += result->value;
+    //         }
+    //     }
+    //     c = fgetc(fp);
+    // }
+    const char * phrase = "#define _M_END_PREPROCESSOR 1";
+    std::string temp;
+    for (size_t i = 0; (c = fgetc(fp)) != EOF && i < strlen(phrase); i++) {
+        if (c == phrase[i]) {
+            temp.push_back(c);
+            printf("pushing %c\n", c);
+        } else {
+            i = -1;
+            *macro_text += temp;
+            temp.clear();
+            macro_text->push_back(c);
+            printf("adding temp: %s\n", temp.c_str());
         }
-        if (isalnum(c)) {
-            MToken * result = stringToken(fp, &c, &macroMode);
-            if (!macroMode) {
-                buffer[++*count] = result;
-                printf("got string token with count: %s/%lu\n", result->value, *count);
-                break; // note this
-            }
-        }
-        c = fgetc(fp);
+    }
+    if (c == EOF) {
+        error ("Error: Need to define _M_END_PREPROCESSOR 1 at end of macro defs");
     }
 loop:
     while(!feof(fp)) {
@@ -167,7 +185,7 @@ loop:
         }
         // process string
         else if (isalpha(c) || c == '_') {
-            buffer[++*count] = stringToken(fp, &c, &macroMode);
+            buffer[++*count] = stringToken(fp, &c);
             printf("got string token with count: %s/%lu\n", buffer[*count]->value, *count);
             // c = fgetc(fp);
             goto loop;

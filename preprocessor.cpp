@@ -71,7 +71,8 @@ void Function::print() {
 Preprocessor::Preprocessor(std::string filename) {
     FILE *fp = fopen(filename.c_str(), "r");
     if (fp) {
-        this->tokens = lex(fp, &tokenCount);
+        MToken **tks = lex(fp, &tokenCount, &macro_text);
+        tokens = std::vector<MToken *>(tks, tks + tokenCount);
         #if DEBUG
         printf("tokenCount: %lu\n", tokenCount);
         for (size_t i = 0; i < tokenCount; i++)
@@ -88,26 +89,23 @@ Preprocessor::Preprocessor(std::string filename) {
 void Preprocessor::process(std::string outfile) {
     first_pass(); // gather user defined types
     second_pass(); // gather type info for all variables
-    std::string result, scope, temp, class_definition_string = "#define bool int\n#define true 1\n#define false 0\n";
-    std::vector<MToken *> new_tokens;
+    std::string result = macro_text + "#include \"mlib.h\"\n", scope, temp, class_definition_string = "#define bool int\n#define true 1\n#define false 0\n";
+    // std::vector<MToken *> tokens;
     // third pass - replace class definitions with appropriate code
-    for(cursor = 0; cursor < tokenCount; cursor++) {
-        if (!(temp = class_declaration()).empty()) {
-            class_definition_string += temp + "\n";
-        } 
-        new_tokens.push_back(tokens[cursor]);
-    }
-
     std::vector<MToken *> specifiers;
     Function * function_ptr = nullptr;
-    // replace variable and method usage with appropriate name and pointers
-    for (cursor = 0; cursor < new_tokens.size(); cursor++) {
-        if (new_tokens[cursor]->type == IDENTIFIER) {
-            std::string scope, identifier, variable_identifier = new_tokens[cursor]->value;
+    for(cursor = 0; cursor < tokenCount; cursor++) {
+        loop:
+        if (!(temp = class_declaration()).empty()) {
+            result += temp + "\n";
+            goto loop;
+        }
+        if (tokens[cursor]->type == IDENTIFIER) {
+            std::string scope, identifier, variable_identifier = tokens[cursor]->value;
             // 2 cases
-            int type = new_tokens[cursor + 1]->type;
-            if ((type == PTR_OP || type == '.') && new_tokens[cursor + 2]->type == IDENTIFIER) {
-                identifier = new_tokens[cursor + 2]->value;
+            int type = tokens[cursor + 1]->type;
+            if ((type == PTR_OP || type == '.') && tokens[cursor + 2]->type == IDENTIFIER) {
+                identifier = tokens[cursor + 2]->value;
                 printf("\n\nit happed with identifier: %s\n", identifier.c_str());
                 scope = variable_types[variable_identifier];
                 if (scope.empty()) {
@@ -117,8 +115,8 @@ void Preprocessor::process(std::string outfile) {
                 std::vector<std::string> arguments;
                 std::vector<std::string> argument_types;
                 // function
-                if (new_tokens[cursor + 3]->type == '(') {
-                    collect_function_arguments(cursor += 3, new_tokens, &arguments, &argument_types);
+                if (tokens[cursor + 3]->type == '(') {
+                    collect_function_arguments(cursor += 3, tokens, &arguments, &argument_types);
                     // generate full method identifier and make sure it's valid
                     identifier = unique_function_identifier(scope, identifier, argument_types);
                     printf("\nidentifier: %s\n\n", identifier.c_str());
@@ -139,20 +137,25 @@ void Preprocessor::process(std::string outfile) {
             } else {
                 result += variable_identifier;
             }
-        } else if (new_tokens[cursor]->type == CLASS_NAME) { // static
+        } else if (tokens[cursor]->type == CLASS_NAME) { // static
             printf("it was a class name");
-            result += unique_class_identifier(new_tokens[cursor]->value);
+            result += unique_class_identifier(tokens[cursor]->value);
             result += " ";
             // deal with this in second version
         } else {
-            printf("token/type: %s/%d\n", new_tokens[cursor]->value, new_tokens[cursor]->type);
-            result += new_tokens[cursor]->value;
-            if (new_tokens[cursor]->type == ';') {
+            printf("token/type: %s/%d\n", tokens[cursor]->value, tokens[cursor]->type);
+            result += tokens[cursor]->value;
+            if (tokens[cursor]->type == ';') {
                 result.push_back('\n');
-            } else if (new_tokens[cursor]->type != '*')
+            } else if (tokens[cursor]->type != '*')
                 result.push_back(' ');
         }
     }
+
+    // replace variable and method usage with appropriate name and pointers
+    // for (cursor = 0; cursor < new_tokens.size(); cursor++) {
+        
+    // }
     std::string output = class_definition_string + result;
     // need to make lexer lex a string, not just a file
     FILE *fp = fopen(outfile.c_str(), "w+");
@@ -166,9 +169,9 @@ std::string Preprocessor::class_declaration() {
     bool deinit_found_flag = false;
     if (accept(CLASS) && accept(CLASS_NAME)) {
         #if DEBUG
-            puts("inside class declaration");
+            puts("\n\n\n\t\tINSIDE CLASS DECLARATION\n\n\n");
         #endif
-        std::string super_class_identifier, identifier, item_string, function_declarations, class_body = "typedef struct {\n";
+        std::string super_class_identifier, identifier, item_string, function_declarations, class_body = "typedef struct {\n\t";
         // here the identifier and super identifier are in the original format
         if (accept('{')) {
             identifier = tokens[cursor - 2]->value;
@@ -180,9 +183,10 @@ std::string Preprocessor::class_declaration() {
             error("Error: Syntax error");
         }
 
-        
-        // identifier = unique_class_identifier(identifier);
         super_class[identifier] = super_class_identifier; // this is correct
+        super_class_identifier = unique_class_identifier(super_class_identifier);
+
+        class_body += super_class_identifier + ";\n";
 
         while(1) {
             bool outside_class_body = false;
@@ -530,6 +534,8 @@ void Preprocessor::first_pass() {
     for (size_t i = 0; i < tokenCount; i++) {
         if (tokens[i]->type == TYPE_NAME) {
             printf("typename: %s\n", tokens[i]->value);
+        } else if (tokens[i]->type == CLASS_NAME) {
+            printf("class_name: %s\n", tokens[i]->value);
         }
     }
 }

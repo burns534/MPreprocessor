@@ -6,6 +6,7 @@
 #include <set>
 #include <sstream>
 #include <stack>
+#include "mlib.h"
 
 struct Parameter {
     std::vector<MToken *> specifiers;
@@ -41,13 +42,14 @@ struct Preprocessor {
     MToken * type_qualifier();
     MToken * storage_class_specifier();
 private:
+    std::string macro_text;
     int accept(int token);
     void unaccept();
     void first_pass(); // gathers all user defined types
     void second_pass(); // gathers type info for all variables. As string?
     void collect_function_arguments(size_t &i, std::vector<MToken *> tokens, std::vector<std::string> *arguments, std::vector<std::string> *argument_types);
     std::string generate_function_body(Function *function);
-    MToken **tokens;
+    std::vector<MToken *> tokens;
     size_t tokenCount, cursor;
     // map from class method hashed identifier to function info
     std::map<std::string, Function *> function_info;

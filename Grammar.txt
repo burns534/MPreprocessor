@@ -1,0 +1,3 @@
+The preprocessor grammar will be the same as C preprocessor grammar except that the
+directives must end with #define _M_END_PREPROCESSOR 1. This requirement will be removed
+in a future version. This obviously won't allow directives within the body of the program.
