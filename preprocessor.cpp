@@ -14,24 +14,33 @@ static void error(const char *message) {
     perror(message);
     exit(EXIT_FAILURE);
 }
-// will need to be changed
-static std::string unique_function_identifier(std::string scope, std::string identifier, std::vector<Parameter> params) {
-    std::string result = "_" + scope + "_" + identifier;
-    for (size_t i = 0; i < params.size(); i++) {
-        for (size_t j = 0; j < params[i].specifiers.size(); j++) {
-            result.push_back('_');
-            result += params[i].specifiers[j]->value;
-        }
-    }
-    return result;
-}
 
 static std::string unique_function_identifier(std::string scope, std::string identifier, std::vector<std::string> arguments) {
     std::string result = "_" + scope + "_" + identifier;
+    // puts("\n\n\n\t\tUNIQUE_FUNCTION_IDENTIFIER\n\n\n");
     for (size_t i = 0; i < arguments.size(); i++) {
         result += "_" + arguments[i];
+        if (result.back() == '*') {
+            result.pop_back();
+            result += "ptr";
+        }
+        // printf("arguments[%lu]: %s\n", i, arguments[i].c_str());
     }
+    // printf("result: %s\n", result.c_str());
     return result;
+}
+
+static std::string unique_function_identifier(std::string scope, std::string identifier, std::vector<Parameter> params) {
+    std::vector<std::string> arguments;
+    for (size_t i = 0; i < params.size(); i++) {
+        std::string temp;
+        for (size_t j = 0; j < params[i].specifiers.size(); j++) {
+            if (j > 0) temp.push_back('_');
+            temp += params[i].specifiers[j]->value;
+        }
+        arguments.push_back(temp);
+    }
+    return unique_function_identifier(scope, identifier, arguments);
 }
 
 static std::string unique_class_identifier(std::string identifier) {
@@ -138,7 +147,9 @@ void Preprocessor::process(std::string outfile) {
         } else {
             printf("token/type: %s/%d\n", new_tokens[cursor]->value, new_tokens[cursor]->type);
             result += new_tokens[cursor]->value;
-            if (new_tokens[cursor]->type != '*')
+            if (new_tokens[cursor]->type == ';') {
+                result.push_back('\n');
+            } else if (new_tokens[cursor]->type != '*')
                 result.push_back(' ');
         }
     }
@@ -182,7 +193,7 @@ std::string Preprocessor::class_declaration() {
                 if (outside_class_body) {
                     function_declarations += item_string;
                 } else {
-                    class_body += item_string;
+                    class_body += '\t' + item_string;
                 }
             } else if (!(item_string = initializer()).empty()) {
                 function_declarations += item_string;
@@ -192,7 +203,7 @@ std::string Preprocessor::class_declaration() {
             } else if (deinit_found_flag && !(item_string = deinitializer()).empty()) {
                 error("Error: cannot have multiple deinitializers");
             } else if (accept('}')) {
-                return function_declarations + class_body + "}" + unique_class_identifier(identifier) + ";";
+                return class_body + "} " + unique_class_identifier(identifier) + ";\n" + function_declarations;
             } else {
                 error("Class contains invalid stuff");
             }
@@ -317,7 +328,9 @@ std::string Preprocessor::class_item(std::string class_name, bool *outside_class
                 // original scope
                 Function *function = new Function(class_name, specifiers, identifier, params, body_tokens);
                 function_info[method_name] = function;
-                result += "(" + parameter_string + ") {" + generate_function_body(function) + "}\n";
+                result += "(" + parameter_string + ") {\n\t" + generate_function_body(function);
+                result.pop_back();
+                result += "}\n";
                 *outside_class_body = true;
                 return result;
             } else {
@@ -624,7 +637,15 @@ std::string Preprocessor::generate_function_body(Function *function) {
                 }
                 // good
             } else if (variable_types[variable_identifier] == function->scope) {
-                result += "self->" + variable_identifier; // this might not always work
+                /* the following clause prevents the transformation of CLASS_NAME IDENTIFIER
+                to CLASS_NAME self->IDENTIFIER. 
+                i.e. variable declaration. ex: Person person_object; should not be transformed.
+                */
+                if (i > 0 && function->body_tokens[i - 1]->type != CLASS_NAME) {
+                    result += "self->" + variable_identifier; // this might not always work
+                } else {
+                    result += variable_identifier;
+                }
             } else if (function->body_tokens[i + 1]->type == '(') {
                 std::vector<std::string> arguments;
                 std::vector<std::string> argument_types;
@@ -680,8 +701,11 @@ std::string Preprocessor::generate_function_body(Function *function) {
             result += " ";
         } else {
             result += token->value;
-            if (token->type != '*')
+            if (token->type == ';') {
+                result += "\n\t";
+            } else if (token->type != '*') {
                 result.push_back(' ');
+            }
         }
     }
     return result;
