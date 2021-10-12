@@ -1,7 +1,7 @@
 #ifndef TOKEN_TYPE_H
 #define TOKEN_TYPE_H
 #pragma once
-#define NUM_KEYWORDS 23
+#define NUM_KEYWORDS 24
 // has to be in specific order for indexing to work
 // does not have bitwise ops
 typedef enum {
@@ -57,13 +57,14 @@ typedef enum {
     STRING_LITERAL,
     CONSTANT,
     IDENTIFIER,
+    RETURN_SYMBOL,
     COMMENT
 
 } TokenType;
 
 static TokenType type_specifiers[] = {
     FLOAT, INT, DOUBLE, LONG, CHAR, VOID
-}
+};
 
 
 #endif

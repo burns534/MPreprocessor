@@ -1,6 +1,8 @@
 #include "parser.h"
+#include <time.h>
 
 int main(int argc, char **argv) {
+    srand(time(NULL));
     // const int token_num = 100;
     // Token **tokens = malloc(sizeof(Token*) * token_num);
     // tokenize("test.txt", tokens, token_num);

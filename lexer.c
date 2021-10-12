@@ -61,12 +61,14 @@ static int is_keyword(char *string) {
 // also can't have a string literal longer than 255 bytes
 static Token * get_string_literal(FILE *file) {
     char current_char, *token_string = malloc(TOKEN_MAX_LENGTH);
-    for(int i = 0; i < TOKEN_MAX_LENGTH - 1; i++) {
-        token_string[i] = current_char;
-        if ((current_char = fgetc(file)) == '"') {
-            token_string[i + 1] = 0;
+    int i = 0;
+    for(; i < TOKEN_MAX_LENGTH - 1; i++) {
+        current_char = fgetc(file);
+        if (current_char == '"') {
+            token_string[i] = 0;
             break;
         }
+        token_string[i] = current_char;
     }
     return create_token(STRING_LITERAL, token_string);
 }
@@ -108,7 +110,7 @@ static void error(const char *message) {
     perror(message);
     exit(EXIT_FAILURE);
 }
-
+// return number of tokens
 int tokenize(const char *filename, Token **tokens, int tokens_length) {
     int cursor = 0, token_count = 0;
     char current_char, token_string[TOKEN_MAX_LENGTH];
@@ -150,7 +152,12 @@ int tokenize(const char *filename, Token **tokens, int tokens_length) {
                     tokens[token_count++] = create_token(OP_ADD, "+");
                     break;
                 case '-':
-                    tokens[token_count++] = create_token(OP_SUB, "-");
+                    if ((current_char = fgetc(file)) == '>')
+                        tokens[token_count++] = create_token(RETURN_SYMBOL, "->");
+                    else {
+                        tokens[token_count++] = create_token(OP_SUB, "-");
+                        backtrack(file, 1);
+                    }
                     break;
                 case '*':
                     tokens[token_count++] = create_token(OP_MUL, "*");
@@ -197,5 +204,5 @@ int tokenize(const char *filename, Token **tokens, int tokens_length) {
             }
         }
     }
-    return 0;
+    return token_count;
 }

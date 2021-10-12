@@ -6,7 +6,7 @@
 
 typedef struct {
     TokenType type;
-    const char *string;
+    char *string;
 } Token;
 
 Token * create_token(TokenType, char*);
