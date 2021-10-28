@@ -13,7 +13,7 @@ int main(int argc, char **argv) {
     }
 #endif
 
-    parse("test.txt", "output.c");
+    parse("function_test.txt", "output.txt");
 
 
     return 0;

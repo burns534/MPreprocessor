@@ -23,42 +23,42 @@ typedef enum {
     // primitives
     FLOAT,
     INT,
-    DOUBLE,
-    LONG,
-    CHAR,
-    VOID,
+    DOUBLE,             // double
+    LONG,               // long
+    CHAR,               // char
+    VOID,               // void
 
     // class
-    CLASS,
-    SUPER,
-    SELF,
-    INIT,
+    CLASS,              // class
+    SUPER,              // super
+    SELF,               // self
+    INIT,               // init
 
-    OP_ADD, 
-    OP_SUB, 
-    OP_MUL, 
-    OP_DIV, 
-    OP_AND,
-    OP_OR,
-    OP_LT,
-    OP_EQ,
-    OP_MOD,
-    OPEN_BRACE, 
-    CLOSE_BRACE,
-    OPEN_CURL_BRACE, 
-    CLOSE_CURL_BRACE,
-    OPEN_PAREN,
-    CLOSE_PAREN,
-    SEMICOLON,
-    COLON, 
-    COMMA,
-    DOT,
-    EQ,
-    STRING_LITERAL,
-    CONSTANT,
-    IDENTIFIER,
-    RETURN_SYMBOL,
-    COMMENT
+    OP_ADD,             // +
+    OP_SUB,             // -
+    OP_MUL,             // *
+    OP_DIV,             // /
+    OP_AND,             // &&
+    OP_OR,              // ||
+    OP_LT,              // <
+    OP_EQ,              // ==
+    OP_MOD,             // %
+    OPEN_BRACE,         // [
+    CLOSE_BRACE,        // ]
+    OPEN_CURL_BRACE,    // {
+    CLOSE_CURL_BRACE,   // }
+    OPEN_PAREN,         // ()
+    CLOSE_PAREN,        // )
+    SEMICOLON,          // ;
+    COLON,              // :
+    COMMA,              // ,
+    DOT,                // .
+    EQ,                 // =
+    STRING_LITERAL,     // ""
+    CONSTANT,           // [0-9]
+    IDENTIFIER,         // [a-Z | 0-9 | _]
+    RETURN_SYMBOL,      // ->
+    COMMENT             // //
 
 } TokenType;
 
