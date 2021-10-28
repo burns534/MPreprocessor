@@ -1,15 +1,25 @@
 #include "parser.h"
 // static long user_defined_types_length = 0, class_table_count = 0, token_count = 0, cursor = 0;
 // static char **user_defined_types, **user_defined_types_internal;
-static long token_count = 0, cursor = 0, udt_count = 0;
-static char **udt_table;
+static long token_count = 0, cursor = 0, udt_count = 0, symbol_table_top = 0, symbol_top_stack_top = 0;
+static char **udt_table, **symbol_table_keys, **symbol_table_values;
+static long symbol_top_stack[64];
 // static function **function_table;
 // static variable **variable_table;
 // static class **class_table;
 static Token **tokens;
 
+static inline char * append(char *str1, char *str2) {
+    size_t len = strlen(str1) + strlen(str2) + 1;
+    char *result = malloc(len);
+    strcpy(result, str1);
+    strcat(result, str2);
+    result[len - 1] = 0;
+    return result;
+}
+
 // linear search... don't want to implement set struct in C
-static int array_contains_string(char **array, int array_length, char *string) {
+static inline int array_contains_string(char **array, int array_length, char *string) {
     for (int i = 0; i < array_length; i++) {
         if (strcmp(array[i], string) == 0)
             return 1;
@@ -17,7 +27,7 @@ static int array_contains_string(char **array, int array_length, char *string) {
     return 0;
 }
 
-static int array_contains_int(int *array, int array_length, int n) {
+static inline int array_contains_int(int *array, int array_length, int n) {
     for (int i = 0; i < array_length; i++) {
         if (array[i] == n)
             return 1;
@@ -25,72 +35,54 @@ static int array_contains_int(int *array, int array_length, int n) {
     return 0;
 }
 
-// static int get_class_index(char *class_name) {
-//     for (int i = 0; i < class_table_count; i++) {
-//         if (strcmp(class_table[i]->name, class_name) == 0)
-//             return i;
-//     }
-//     return -1;
-// }
-
-static int vtable_contains(class *c, char *variable_name) {
-    for (int i = 0; i < c->variable_count; i++) {
-        if (strcmp(c->variables[i]->identifier, variable_name) == 0)
-            return 1;
+static inline char * type_name_for_symbol(char *symbol) {
+    for (int i = 0; i < symbol_table_top; i++) {
+        if (strcmp(symbol_table_keys[i], symbol) == 0)
+            return symbol_table_values[i];
     }
-    return 0;
+    return NULL;
 }
 
-static int ftable_contains(class *c, char *function_name) {
-    for (int i = 0; i < c->function_count; i++) {
-        if (strcmp(c->functions[i]->name, function_name) == 0)
-            return 1;
-    }
-    return 0;
-}
-
-static int get_var_index(variable **vars, int len, char *variable_name) {
-    for (int i = 0; i < len; i++) {
-        if (strcmp(variable_name, vars[i]->identifier) == 0) 
-            return i;
-    }
-    return -1;
-}
-
-// static int type_name(Token *token, char **types, int types_length) {
-//     return array_contains_string(types, types_length, token->string);
-// }
-
-// static int type_specifier(Token *token, char **types, int types_length) {
-//     // puts("type spec called");
-//     return array_contains_int((int *) type_specifiers, 6, token->type) || type_name(token, types, types_length);
-// }
-
-static int type_name(Token *token) {
+static inline int type_name(Token *token) {
     return array_contains_string(udt_table, udt_count, token->string);
 }
 
-static int type_name_string(char *identifier) {
+static inline int type_name_string(char *identifier) {
     return array_contains_string(udt_table, udt_count, identifier);
 }
 
-static int type_specifier(Token *token) {
+static inline int type_specifier(Token *token) {
     // puts("type spec called");
     return array_contains_int((int *) type_specifiers, 6, token->type) || type_name(token);
 }
 
-static char * generate_method_signature(char *class_name, char *function_name) {
-    size_t l1 = strlen(class_name), l2 = strlen(function_name);
-    char *result = malloc(l1 + l2 + 2);
-    memcpy(result, class_name, l1);
-    result[l1 + 1] = '_';
-    memcpy(result, function_name, l1 + 1);
-    result[l1 + l2 + 1] = 0;
-    return result;
-}
+// static char * generate_method_signature(char *class_name, char *function_name) {
+//     size_t l1 = strlen(class_name), l2 = strlen(function_name);
+//     char *result = malloc(l1 + l2 + 2);
+//     memcpy(result, class_name, l1);
+//     result[l1 + 1] = '_';
+//     memcpy(result, function_name, l1 + 1);
+//     result[l1 + l2 + 1] = 0;
+//     return result;
+// }
 
-static char * generate_class_signature(char *class_name) {
-    return class_name;
+static char *generate_method_signature(char *class_name, char *function_name, char **arg_labels, int arg_count) {
+    int l = arg_count + 3;
+    for (int i = 0; i < arg_count; i++)
+        l += strlen(arg_labels[i]);
+    char *result;
+    if (!class_name) {
+        result = malloc(strlen(function_name) + l); // arg_count underscores plus 2 more plus null plus arg length
+        sprintf(result, "_%s", function_name);
+    } else {
+        result = malloc(strlen(class_name) + strlen(function_name) + l); // arg_count underscores plus 2 more plus null plus arg length
+        sprintf(result, "_%s_%s", class_name, function_name);
+    }
+    for (int i = 0; i < arg_count; i++) {
+        result = append(result, "_");
+        result = append(result, arg_labels[i]);
+    }
+    return result;
 }
 
 static int primary_expression(Token *token) {
@@ -124,23 +116,23 @@ static int primary_expression(Token *token) {
 
 
 
-static argument * function_argument() {
-    if (tokens[cursor]->type == IDENTIFIER && tokens[cursor + 1]->type == COLON && type_specifier(tokens[cursor + 2])) {
-        argument *result = malloc(sizeof(argument));
-        result->name = tokens[cursor]->string;
-        result->type = tokens[cursor + 2];
-        cursor += 3;
-        return result;
-    } 
-    return NULL;
-}
+// static argument * function_argument() {
+//     if (tokens[cursor]->type == IDENTIFIER && tokens[cursor + 1]->type == COLON && type_specifier(tokens[cursor + 2])) {
+//         argument *result = malloc(sizeof(argument));
+//         result->name = tokens[cursor]->string;
+//         result->type = tokens[cursor + 2];
+//         cursor += 3;
+//         return result;
+//     } 
+//     return NULL;
+// }
 
-static class * allocate_class() {
-    class *result = malloc(sizeof(class));
-    result->functions = malloc(sizeof(function *) * MAX_CLASS_FUNCTIONS);
-    result->variables = malloc(sizeof(variable *) * MAX_CLASS_VARS);
-    return result;
-}
+// static class * allocate_class() {
+//     class *result = malloc(sizeof(class));
+//     result->functions = malloc(sizeof(function *) * MAX_CLASS_FUNCTIONS);
+//     result->variables = malloc(sizeof(variable *) * MAX_CLASS_VARS);
+//     return result;
+// }
 
 // static class * initialize_class(char *name) {
 //     class *result = allocate_class();
@@ -150,33 +142,33 @@ static class * allocate_class() {
 //     return result;
 // }
 
-static void deallocate_class(class *c) {
-    free(c->functions);
-    free(c->variables);
-    free(c);
-}
+// static void deallocate_class(class *c) {
+//     free(c->functions);
+//     free(c->variables);
+//     free(c);
+// }
 
-static function * allocate_function() {
-    function *result = malloc(sizeof(function));
-    result->args = malloc(sizeof(argument *) * FUNCTION_MAX_ARGS);
-    result->body = malloc(sizeof(Token *) * DEFAULT_BODY_SIZE);
-    return result;
-}
+// static function * allocate_function() {
+//     function *result = malloc(sizeof(function));
+//     result->args = malloc(sizeof(argument *) * FUNCTION_MAX_ARGS);
+//     result->body = malloc(sizeof(Token *) * DEFAULT_BODY_SIZE);
+//     return result;
+// }
 
-static function * initialize_function(char *name, char *class_name, int is_init) {
-    function *result = allocate_function();
-    result->name = name;
-    result->scope = class_name;
-    result->internal_name = generate_method_signature(class_name, name);
-    result->arg_count = result->body_count = 0;
-    result->is_init = is_init;
-    return result;
-}
+// static function * initialize_function(char *name, char *class_name, int is_init) {
+//     function *result = allocate_function();
+//     result->name = name;
+//     result->scope = class_name;
+//     result->internal_name = generate_method_signature(class_name, name);
+//     result->arg_count = result->body_count = 0;
+//     result->is_init = is_init;
+//     return result;
+// }
 
-static void deallocate_function(function *f) {
-    free(f->args);
-    free(f);
-}
+// static void deallocate_function(function *f) {
+//     free(f->args);
+//     free(f);
+// }
 
 // rewrite this
 // static function * function_definition(char *class_name) {
@@ -286,14 +278,6 @@ static void error(char *message) {
     exit(EXIT_FAILURE);
 }
 
-static inline char * append(char *str1, char *str2) {
-    size_t len = strlen(str1) + strlen(str2) + 1;
-    char *result = malloc(len);
-    strcpy(result, str1);
-    strcat(result, str2);
-    return result;
-}
-
 static char * variable_declaration() {
     if (cursor + 3 >= token_count) return NULL;
     // puts("variable dec called");
@@ -307,6 +291,10 @@ static char * variable_declaration() {
         }
         char *identifier = tokens[cursor + 1]->string;
         char *type = tokens[cursor + 3]->string;
+// symbol table manip
+        symbol_table_keys[symbol_table_top] = identifier;
+        symbol_table_values[symbol_table_top++] = type;
+
         if (tokens[cursor]->type == VAR) {
             // if it is a class, then it needs to be a pointer
             if (type_name_string(type)) {
@@ -334,27 +322,91 @@ static char * variable_declaration() {
     }
     return NULL;
 }
+// called with cursor at token following open paren
+static char * create_function_call(char *scope, char* scope_var, char *identifier) {
+    char * arg_labels[8 * MAX_ARG_COUNT],
+    *args[8 * MAX_ARG_COUNT],
+    *arg_string,
+    *result,
+    error_message[200];
+    int arg_count = 0;
 
+    cursor++; // skip open paren
+    // collect args
+    while (tokens[cursor]->type != CLOSE_PAREN && arg_count < MAX_ARG_COUNT) {
+        if (tokens[cursor]->type != IDENTIFIER) {
+            snprintf(error_message, 200, "Syntax Error: expected identifier. Instead found %s inside method call %s", tokens[cursor]->string, identifier);
+            error(error_message);
+        }
+        
+        if (tokens[cursor + 1]->type != COLON) {
+            snprintf(error_message, 200, "Syntax Error: expected colon. instead found %s inside method call %s", tokens[cursor]->string, identifier);
+            error(error_message);
+        }
+        
+        // collect label and then collect string until comma
+        arg_labels[arg_count] = tokens[cursor]->string;
+        arg_string = "";
+        cursor += 2; // skip colon
+        while (tokens[cursor]->type != COMMA && tokens[cursor]->type != CLOSE_PAREN) {
+            arg_string = append(arg_string, tokens[cursor]->string);
+            cursor++;
+        }
+        args[arg_count++] = arg_string;
 
+        if (tokens[cursor]->type == COMMA)
+            cursor++;
+    }
+    
+    result = generate_method_signature(scope, identifier, arg_labels, arg_count);
+
+    result = append(result, "(");
+
+    for (int i = 0; i < arg_count; i++) {
+        result = append(result, args[i]);
+        result = append(result, ", ");
+    }
+
+    if (scope && scope_var) {
+        result = append(result, scope_var);
+    }
+
+    if (result[strlen(result)] == ' ')
+        result[strlen(result) - 2] = 0; // ignore the last comma
+    
+    result = append(result, ")");
+    cursor++; // increment past close paren
+    return result;
+}
 
 static char * function_definition(char *scope) {
     if (cursor + 4 >= token_count) return NULL; // shortest possible func id()
     if (tokens[cursor]->type == FUNC) {
-        if (tokens[cursor + 1]->type != IDENTIFIER)
+        if (tokens[cursor + 1]->type != IDENTIFIER) {
+            printf("%d\n", tokens[cursor + 1]->type);
+            puts(tokens[cursor + 1]->string);
             error("Syntax Error: Expected identifier following 'func' keyword");
+        }
         const int e_length = 200;
         char error_message[e_length], 
         *result = "",
         *identifier = tokens[cursor + 1]->string,
-        *arg_string = "(";
+        *arg_string = "(",
+        **arg_labels = malloc(MAX_ARG_COUNT);
+// SCOPE CHANGE
+        symbol_top_stack[symbol_top_stack_top++] = symbol_table_top;
+
+// symbol table manip 
+// this feature won't work without storing separate table for each class
+        // if (scope) {
+        //     symbol_table_keys[symbol_table_top] = identifier;
+        //     symbol_table_keys[symbol_table_top++] = scope;
+        // }
+    
         if (tokens[cursor + 2]->type != OPEN_PAREN) {
             snprintf(error_message, 200, "Syntax Error: Expected parenthesis following function name '%s'", identifier);
             error(error_message);
         }
-        // if (scope && tokens[cursor + 3]->type != SELF) {
-        //     snprintf(error_message, 100, "Error: Expected 'self' keyword as first parameter for function '%s'", identifier);
-        //     error(error_message);
-        // }
         
         cursor += 3;
         int arg_count = 0;
@@ -377,8 +429,12 @@ static char * function_definition(char *scope) {
                     arg = malloc(strlen(arg_identifier) + strlen(arg_type) + (arg_count > 0 ? 4 : 2)); // space + , + space + 1
                     sprintf(arg, arg_count > 0 ? ", %s %s" : "%s %s", arg_type, arg_identifier);
                 }
-                arg_count++;
                 arg_string = append(arg_string, arg);
+                arg_labels[arg_count++] = arg_identifier;
+ // symbol table here               
+                symbol_table_keys[symbol_table_top] = arg_identifier;
+                symbol_table_values[symbol_table_top++] = arg_type;
+
                 cursor += 3;
                 continue;
             }
@@ -387,8 +443,8 @@ static char * function_definition(char *scope) {
         if (scope) {
             if (arg_count > 0)
                 arg_string = append(arg_string, ", ");
-            char *temp = malloc(strlen(scope) + 6);
-            sprintf(temp, "%s self", scope);
+            char *temp = malloc(strlen(scope) + 7);
+            sprintf(temp, "%s *self", scope);
             arg_string = append(arg_string, temp);
         }
         
@@ -400,21 +456,99 @@ static char * function_definition(char *scope) {
                 error(error_message);
             }
             result = tokens[cursor + 2]->string;
+            result = append(result, " ");
             if (type_name(tokens[cursor + 2]))
                 result = append(result, " * ");
+            cursor += 4;
         } else {
             result = "void ";
+            cursor += 2;
         }
 
-        result = append(result, identifier); // FIXME need to generate unique name
+        result = append(result, generate_method_signature(scope, identifier, arg_labels, arg_count)); // FIXME need to generate unique name
 
         result = append(result, arg_string);
 
         result = append(result, ") {\n");
 
         // handle function body
+        int bracket_depth = 1;
 
-        
+        // if a segmentation fault happens in here, somebody did bad brackets
+        while (cursor < token_count && bracket_depth > 0) {
+            if (tokens[cursor]->type == OPEN_CURL_BRACE) {
+                bracket_depth++;
+// SCOPE CHANGE
+                symbol_top_stack[symbol_top_stack_top++] = symbol_table_top;
+            } else if (tokens[cursor]->type == CLOSE_CURL_BRACE) {
+                bracket_depth--;
+// SCOPE CHANGE
+                if (bracket_depth > 0) // because we started bracket_depth at 1
+                    symbol_table_top = symbol_top_stack[--symbol_top_stack_top];
+            } else if (type_name(tokens[cursor]) && tokens[cursor + 1]->type == IDENTIFIER) {
+// symbol table manip
+                symbol_table_keys[symbol_table_top] = tokens[cursor + 1]->string;
+                symbol_table_values[symbol_table_top++] = tokens[cursor]->string;
+                cursor += 2;
+                continue;
+            } else if (tokens[cursor]->type == SELF) {
+                if (tokens[cursor + 1]->type == DOT) {
+                    if (tokens[cursor + 2]->type != IDENTIFIER)
+                        error("Syntax Error");
+                    char *temp_identifier = tokens[cursor + 2]->string;
+                    // two cases: var or func
+                    if (tokens[cursor + 3]->type == OPEN_PAREN) { // func case 2
+                        // gather function params and their types
+                        cursor += 4;
+                        result = append(result, create_function_call(scope, "self", temp_identifier));
+                        continue;
+                    } else { // variable case 3
+                        result = append(result, "self");
+                        result = append(result, "->");
+                        result = append(result, temp_identifier);
+                        cursor += 3;
+                        continue;
+                    }
+                }
+            } else if (tokens[cursor]->type == INIT) {
+                if (tokens[cursor + 1]->type != OPEN_PAREN)
+                    error("Syntax Error");
+                cursor += 2;
+                result = append(result, create_function_call(scope, NULL, tokens[cursor]->string));
+                continue;
+            } else if (tokens[cursor]->type == IDENTIFIER && tokens[cursor + 1]->type == DOT && tokens[cursor + 2]->type == IDENTIFIER) {
+                // 2 cases
+                // case 1 varid.funcid
+                char *typename, 
+                *variable_identifier = tokens[cursor]->string,
+                *second_identifier = tokens[cursor + 2]->string;
+                if (!(typename = type_name_for_symbol(tokens[cursor]->string))) {
+                    error("Error: dot operator on invalid typename");
+                }
+
+                if (tokens[cursor + 3]->type == OPEN_PAREN) {
+                    cursor += 4;
+                    result = append(result, create_function_call(typename, variable_identifier, second_identifier));
+                    continue;
+                } else {
+                    result = append(result, variable_identifier);
+                    result = append(result, "->");
+                    result = append(result, second_identifier);
+                    cursor += 3;
+                    continue;
+                }  
+            }
+            result = append(result, tokens[cursor]->string);
+            if (tokens[cursor]->type == COMMA || tokens[cursor]->type == CLOSE_CURL_BRACE) {
+                result = append(result, "\n");
+            } else {
+                result = append(result, " ");
+            }
+            cursor++;
+
+        }
+// SCOPE CHANGE
+        symbol_table_top = symbol_top_stack[--symbol_top_stack_top];
 
         return result;
     }
@@ -428,6 +562,8 @@ static char * class_definition() {
         error("Syntax Error: expected identifier in class declaration");
     else if (tokens[cursor + 2]->type != OPEN_CURL_BRACE)
         error("Syntax Error: expected open bracket for class declaration");
+// SCOPE CHANGE
+    symbol_top_stack[symbol_top_stack_top++] = symbol_table_top; // save cursor on stack
 
     char *struct_def = "\ntypedef struct {\n", 
     *method_defs = "", 
@@ -452,6 +588,9 @@ static char * class_definition() {
         // try to get function def
     }
     cursor++; // close curl bracket
+
+// SCOPE CHANGE
+    symbol_table_top = symbol_top_stack[--symbol_top_stack_top];
     // printf("cursor: %ld, token_count: %ld\n", cursor, token_count);
     struct_def = append(struct_def, end);
     method_defs = append(method_defs, struct_def);
@@ -592,13 +731,13 @@ classname -> user declared fuction name (check containment)
 */
 
 
-static variable * initialize_variable(char *identifier, Token *type) {
-    variable *result = malloc(sizeof(variable));
-    result->identifier = identifier;
-    result->type = type;
-    result->is_var = 1;
-    return result;
-}
+// static variable * initialize_variable(char *identifier, Token *type) {
+//     variable *result = malloc(sizeof(variable));
+//     result->identifier = identifier;
+//     result->type = type;
+//     result->is_var = 1;
+//     return result;
+// }
 
 // will perform extremely limited semantic analysis for version 0
 // char * generate_function_body(function *f) {
@@ -672,7 +811,9 @@ void parse(const char *infile, const char *outfile) {
     tokens = malloc(sizeof(Token *) * MAX_TOKEN_NUM);
     token_count = tokenize(infile, tokens, MAX_TOKEN_NUM);
 
-    udt_table = malloc(MAX_UDT_COUNT);
+    udt_table = malloc(8 * MAX_UDT_COUNT);
+    symbol_table_keys = malloc(8 * MAX_SYMBOL_TABLE_COUNT);
+    symbol_table_values = malloc(8 * MAX_SYMBOL_TABLE_COUNT);
 
     // printf("token count: %ld\n", token_count);
     // for (int i = 0; i < token_count; i++) {
@@ -680,6 +821,9 @@ void parse(const char *infile, const char *outfile) {
     // }
 
     // class_table = malloc(sizeof(class *) * MAX_CLASS_NUM);
+    // for (int i = 0; i < token_count; i++) {
+    //     puts(tokens[i]->string);
+    // }
     fputs(first_pass(), output);
 
     // int bracket_depth = 0;

@@ -90,10 +90,12 @@ static Token * get_number_token(FILE *file, char first_char) {
 static Token * get_string_token(FILE *file, char first_char) {
     char *token_string = malloc(TOKEN_MAX_LENGTH);
     int index;
+    int matched_keyword = 0;
     for(int i = 0; i < TOKEN_MAX_LENGTH; i++) {
+        matched_keyword = 0;
         token_string[i] = first_char;
-        if ((index = is_keyword(token_string)) != -1)
-            break;
+        if ((index = is_keyword(token_string)) != -1) 
+            matched_keyword = 1;
         first_char = fgetc(file);
         // gotta backtrack if this happens
         if (!isalnum(first_char) && first_char != '_') {
@@ -101,9 +103,7 @@ static Token * get_string_token(FILE *file, char first_char) {
             break;
         }
     }
-    
-    index = index == -1 ? IDENTIFIER : index;
-    return create_token(index, token_string); // this is int to TokenType implicit casting based on the array ordering
+    return create_token(matched_keyword ? index: IDENTIFIER, token_string);
 }
 
 static void error(const char *message) {
@@ -171,7 +171,20 @@ int tokenize(const char *filename, Token **tokens, int tokens_length) {
                     }
                     break;
                 case '<':
-                    tokens[token_count++] = create_token(OP_LT, "<");
+                    if ((current_char = fgetc(file)) == '=') {
+                        tokens[token_count++] = create_token(OP_LE, "<=");
+                    } else {
+                        tokens[token_count++] = create_token(OP_LT, "<");
+                        backtrack(file, 1);
+                    }
+                    break;
+                case '>':
+                    if ((current_char = fgetc(file)) == '=') {
+                        tokens[token_count++] = create_token(OP_GE, ">=");
+                    } else {
+                        tokens[token_count++] = create_token(OP_GT, ">");
+                        backtrack(file, 1);
+                    }
                     break;
                 case '%':
                     tokens[token_count++] = create_token(OP_MOD, "%");

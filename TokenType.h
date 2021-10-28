@@ -41,6 +41,9 @@ typedef enum {
     OP_AND,             // &&
     OP_OR,              // ||
     OP_LT,              // <
+    OP_GT,              // >
+    OP_GE,              // >=
+    OP_LE,              // <=
     OP_EQ,              // ==
     OP_MOD,             // %
     OPEN_BRACE,         // [
