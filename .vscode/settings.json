@@ -2,6 +2,7 @@
     "files.associations": {
         "tokenizer.h": "c",
         "token.h": "c",
-        "stdio.h": "c"
+        "stdio.h": "c",
+        "*.txt": "c"
     }
 }

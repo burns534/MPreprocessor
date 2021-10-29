@@ -12,8 +12,18 @@ int main(int argc, char **argv) {
         *tokens++;
     }
 #endif
+    if (argc < 2)
+        perror("insufficient arguments provided");
+    char arg2[100], arg1[100];
+    if (argc == 2) {
+        snprintf(arg2, 100, "%s.c", argv[1]);
+    } else {
+        snprintf(arg2, 100, "%s", argv[2]);
+    }
 
-    parse("string_internal.txt", "output.txt");
+    snprintf(arg1, 100, "%s.lws", argv[1]);
+
+    parse(arg1, arg2);
 
 
     return 0;

@@ -13,7 +13,7 @@ static int isalnum(char c) {
     return isdigit(c) || isalpha(c);
 }
 // order must agree with order of TokenType enum
-static const char *keywords[] = {
+static const char * keywords[NUM_KEYWORDS] = {
     "if",
     "else",
     "switch",
@@ -25,6 +25,8 @@ static const char *keywords[] = {
     "enum",
     "while",
     "sizeof",
+    "true",
+    "false",
     "break",
     "continue",
     "return",
@@ -34,10 +36,13 @@ static const char *keywords[] = {
     "long",
     "char",
     "void",
+    "ulong",
+    "bool",
     "class",
     "super",
     "self",
-    "init"
+    "init",
+    "static"
 };
 
 static void backtrack(FILE *file, int num_chars) {
@@ -78,7 +83,8 @@ static Token * get_number_token(FILE *file, char first_char) {
     fpos_t current_position;
     for (int i = 0; i < TOKEN_MAX_LENGTH; i++) {
         number_string[i] = first_char;
-        if (!isdigit((first_char = fgetc(file))))
+        first_char = fgetc(file);
+        if (!isdigit(first_char) && first_char != '.')
             break;
     }
     // should fix the ending
@@ -103,6 +109,14 @@ static Token * get_string_token(FILE *file, char first_char) {
             break;
         }
     }
+    if (matched_keyword && strcmp(keywords[index], "ulong") == 0)
+        token_string = "unsigned long";
+    else if (matched_keyword && strcmp(keywords[index], "bool") == 0)
+        token_string = "unsigned char";
+    else if (matched_keyword && strcmp(keywords[index], "true") == 0)
+        token_string = "1";
+    else if (matched_keyword && strcmp(keywords[index], "false") == 0)
+        token_string = "0";
     return create_token(matched_keyword ? index: IDENTIFIER, token_string);
 }
 
@@ -110,6 +124,8 @@ static void error(const char *message) {
     perror(message);
     exit(EXIT_FAILURE);
 }
+
+
 // return number of tokens
 int tokenize(const char *filename, Token **tokens, int tokens_length) {
     int cursor = 0, token_count = 0;
@@ -128,6 +144,15 @@ int tokenize(const char *filename, Token **tokens, int tokens_length) {
             tokens[token_count++] = get_string_token(file, current_char);
         else {
             switch(current_char) {
+                case '#': {
+                    // get macro
+                    char *buffer = malloc(100), buffer_index = 1;
+                    buffer[0] = '#';
+                    while ((current_char = fgetc(file)) != '>')
+                        buffer[buffer_index++] = current_char;
+                    buffer[buffer_index] = current_char;
+                    tokens[token_count++] = create_token(INCLUDE_STATMENT, buffer);
+                } break;
                 case ' ':
                     break;
                 case '(':
@@ -149,22 +174,53 @@ int tokenize(const char *filename, Token **tokens, int tokens_length) {
                     tokens[token_count++] = create_token(CLOSE_CURL_BRACE, "}");
                     break;
                 case '+':
-                    tokens[token_count++] = create_token(OP_ADD, "+");
+                    if ((current_char = fgetc(file)) == '=')
+                        tokens[token_count++] = create_token(OP_ADD_EQ, "+=");
+                    else if (current_char == '+')
+                        tokens[token_count++] = create_token(OP_INC, "++");
+                    else {
+                        tokens[token_count++] = create_token(OP_ADD, "+");
+                        backtrack(file, 1);
+                    }
                     break;
                 case '-':
                     if ((current_char = fgetc(file)) == '>')
                         tokens[token_count++] = create_token(RETURN_SYMBOL, "->");
+                    else if (current_char == '=')
+                        tokens[token_count++] = create_token(OP_SUB_EQ, "-=");
+                    else if (current_char == '-')
+                        tokens[token_count++] = create_token(OP_DEC, "--");
                     else {
                         tokens[token_count++] = create_token(OP_SUB, "-");
                         backtrack(file, 1);
                     }
                     break;
                 case '*':
-                    tokens[token_count++] = create_token(OP_MUL, "*");
+                    if ((current_char = fgetc(file)) == '=')
+                        tokens[token_count++] = create_token(OP_MUL_EQ, "*=");
+                    else {
+                        tokens[token_count++] = create_token(OP_MUL, "*");
+                        backtrack(file, 1);
+                    }
                     break;
                 case '/':
                     if ((current_char = fgetc(file)) == '/')
-                        tokens[token_count++] = create_token(COMMENT, "//");
+                        // skip comment
+                        
+                        while ((current_char = fgetc(file)) != '\n');
+                    else if (current_char == '*') {
+                        // multiline comment
+                        while (current_char != EOF) {
+                            current_char = fgetc(file);
+                            if (current_char == '*') {
+                                if ((current_char = fgetc(file)) == '/')
+                                    break;
+                                else
+                                    backtrack(file, 1);
+                            }
+                        }
+                    } else if (current_char == '=')
+                        tokens[token_count++] = create_token(OP_DIV_EQ, "/=");
                     else {
                         tokens[token_count++] = create_token(OP_DIV, "/");
                         backtrack(file, 1);
@@ -216,6 +272,7 @@ int tokenize(const char *filename, Token **tokens, int tokens_length) {
                     break;
             }
         }
+        // printf("got token: %s\n", tokens[token_count - 1]->string);
     }
     return token_count;
 }

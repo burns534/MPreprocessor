@@ -1,3 +1,4 @@
 *.txt
 test
-output.c
+*.lws
+lws

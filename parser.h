@@ -16,7 +16,7 @@
 #define MAX_UDT_COUNT 256
 #define MAX_SYMBOL_TABLE_COUNT 512
 #define MAX_ARG_COUNT 16
-
+#define MAX_STATIC_VARS 64
 
 typedef struct {
     char is_var, *identifier;
