@@ -1,605 +1,292 @@
 #include "parser.h"
-// static long user_defined_types_length = 0, class_table_count = 0, token_count = 0, cursor = 0;
-// static char **user_defined_types, **user_defined_types_internal;
-static long token_count = 0, cursor = 0, udt_count = 0, symbol_table_top = 0, symbol_top_stack_top = 0, static_vars_count = 0;
-static char **udt_table, **symbol_table_keys, **symbol_table_values, **static_vars;
-static long symbol_top_stack[64];
-// static function **function_table;
-// static variable **variable_table;
-// static class **class_table;
-static Token **tokens;
-
-static inline void error(char *message) {
-    perror(message);
-    exit(EXIT_FAILURE);
-} 
-
-static inline char * append(char *str1, char *str2) {
-    size_t len = strlen(str1) + strlen(str2) + 1;
-    char *result = malloc(len);
-    strcpy(result, str1);
-    strcat(result, str2);
-    result[len - 1] = 0;
-    return result;
+#include <string.h>
+ #include <stdio.h>
+ static const int _IntArray_DEFAULT_SIZE = 8;
+static const double _IntArray_LOAD_FACTOR = 0.6;
+IntArray * _IntArray_init() {
+IntArray *self = malloc(sizeof(IntArray));
+self->data = malloc(sizeof(int)* _IntArray_DEFAULT_SIZE);
+self->size = _IntArray_DEFAULT_SIZE;
+self->count = 0;
+return self;
 }
-
-// linear search... don't want to implement set struct in C
-static inline int array_contains_string(char **array, int array_length, char *string) {
-    for (int i = 0; i < array_length; i++) {
-        if (strcmp(array[i], string) == 0)
-            return 1;
-    }
-    return 0;
+IntArray * _IntArray_init_fromArray_length(int *fromArray, int length) {
+IntArray *self = malloc(sizeof(IntArray));
+self->size = length * 2;
+self->data = malloc(sizeof(int)* self->size);
+self->count = length;
+return self;
 }
-
-static inline int array_contains_int(int *array, int array_length, int n) {
-    for (int i = 0; i < array_length; i++) {
-        if (array[i] == n)
-            return 1;
-    }
-    return 0;
+void _IntArray_deinit(IntArray *self) {
+free(self->data);
+free(self);
 }
-
-static inline char * type_name_for_symbol(char *symbol) {
-    for (int i = 0; i < symbol_table_top; i++) {
-        if (strcmp(symbol_table_keys[i], symbol) == 0)
-            return symbol_table_values[i];
-    }
-    return NULL;
+int  _IntArray_getValue_atIndex(int atIndex, IntArray *self) {
+if(atIndex >= self->count)return - 1;
+return self->data[atIndex];
 }
-
-static inline int type_name(Token *token) {
-    return array_contains_string(udt_table, udt_count, token->string);
+void _IntArray_resize(IntArray *self) {
+self->size *= 2;
+self->data = realloc(self->data , sizeof(int)* self->size);
 }
-
-static inline int type_name_string(char *identifier) {
-    return array_contains_string(udt_table, udt_count, identifier);
+void _IntArray_append_value(int value, IntArray *self) {
+if(self->count > _IntArray_LOAD_FACTOR * self->size){
+_IntArray_resize(self);
 }
-
-static inline int type_specifier(Token *token) {
-    return array_contains_int((int *) type_specifiers, 8, token->type) || type_name(token);
+self->data[self->count ++]= value;
 }
-
-static char *generate_method_signature(char *class_name, char *function_name, char **arg_labels, int arg_count) {
-    int l = arg_count + 3;
-    for (int i = 0; i < arg_count; i++)
-        l += strlen(arg_labels[i]);
-    char *result;
-    if (!class_name) {
-        result = malloc(strlen(function_name) + l); // arg_count underscores plus 2 more plus null plus arg length
-        sprintf(result, "_%s", function_name);
-    } else {
-        result = malloc(strlen(class_name) + strlen(function_name) + l); // arg_count underscores plus 2 more plus null plus arg length
-        sprintf(result, "_%s_%s", class_name, function_name);
-    }
-    for (int i = 0; i < arg_count; i++) {
-        result = append(result, "_");
-        result = append(result, arg_labels[i]);
-    }
-    return result;
+int  _IntArray_pop(IntArray *self) {
+return self->data[-- self->count];
 }
-
-static char * generate_static_name(char *scope, char *identifier) {
-    char *result = "", temp[100];
-    snprintf(temp, 100, "_%s_%s", scope, identifier);
-    result = append(result, temp);
-    return result;
+int  _IntArray_remove_atIndex(int atIndex, IntArray *self) {
+	const int result = self->data[atIndex];
+for(int i = atIndex;
+i < self->count - 1;
+i ++)self->data[i]= self->data[i + 1];
+return result;
 }
-// this is bad but it will have to do for now
-static char * static_variable_definition(char *scope) { // shortest is static let identifier: type = value;
-    if (cursor + 6 >= token_count) return NULL;
-    if (tokens[cursor]->type == STATIC) {
-        if (tokens[cursor + 1]->type != LET && tokens[cursor + 1]->type != VAR) 
-            error("Expected var or let qualifier");
-        
-        if (tokens[cursor + 2]->type != IDENTIFIER)
-            error("Expected identifier");
-        
-        if (tokens[cursor + 3]->type != COLON)
-            error("Expected colon");
-
-        if (!type_specifier(tokens[cursor + 4]))
-            error("Expected type specifier");
-
-        if (tokens[cursor + 5]->type != EQ)
-            error("Expected assignment in variable definition");
-        
-
-        char *identifier = tokens[cursor + 2]->string,
-        temp[200],
-        *name = generate_static_name(scope, identifier),
-        *type = tokens[cursor + 4]->string,
-        *value = "",
-        *result = tokens[cursor + 1]->type == LET ? "static const " : "static ";
-        cursor += 6;
-        // add to static table
-        static_vars[static_vars_count++] = identifier;
-
-        // if you omit semicolon, this would be problematic
-        while (tokens[cursor]->type != SEMICOLON) {
-            value = append(value, tokens[cursor++]->string);
-            value = append(value, " ");
-        }
-
-        value[strlen(value) - 1] = 0; // remove trailing space;
-
-        snprintf(temp, 200, type_name_string(type) ? "%s *%s = %s;\n" : "%s %s = %s;\n", type, name, value);
-
-        result = append(result, temp);
-        cursor++; // skip semicolon
-        return result;
-    }
-    return NULL;
+static const double _String_LOAD_FACTOR = 0.6;
+static const int _String_DEFAULT_SIZE = 64;
+String * _String_init() {
+String *self = malloc(sizeof(String));
+self->data = malloc(_String_DEFAULT_SIZE);
+self->size = _String_DEFAULT_SIZE;
+self->length = 0;
+return self;
 }
-
-static char * variable_declaration() {
-    if (cursor + 3 >= token_count) return NULL;
-    // puts("variable dec called");
-    char *identifier, *type, *result = "";
-    // printf("cursor: %s, +1: %s, +2: %s, +3: %s\n", tokens[cursor]->string, tokens[cursor + 1]->string, tokens[cursor + 2]->string, tokens[cursor + 3]->string);
-    if (tokens[cursor + 1]->type == IDENTIFIER && tokens[cursor + 2]->type == COLON) {
-        char *identifier = tokens[cursor + 1]->string,
-        *type;
-        result = append(result, tokens[cursor]->type == VAR ? "\t" : "\tconst ");
-        int increment;
-        // array dec
-        if (tokens[cursor + 3]->type == OPEN_BRACE) {
-            if (!type_specifier(tokens[cursor + 4]))
-                error("Expected type specifier");
-            else if (tokens[cursor + 5]->type != CLOSE_BRACE)
-                error("Expected close bracket");
-            type = tokens[cursor + 4]->string;
-            result = append(result, type);
-            result = append(result, " ");
-            result = append(result, "*");
-            increment = 6;
-        } else {
-            if (!type_specifier(tokens[cursor + 3]))
-                error("Expected type specifier");
-            type = tokens[cursor + 3]->string;
-            result = append(result, type);
-            result = append(result, " ");
-            increment = 4;
-        }
-
-        if (type_name_string(type))
-            result = append(result, "*");
-
-        result = append(result, identifier);
-        result = append(result, ";\n");
-
-        
-// symbol table manip
-        symbol_table_keys[symbol_table_top] = identifier;
-        symbol_table_values[symbol_table_top++] = type;
-
-       
-        cursor += increment;
-        return result;
-    }
-    return NULL;
+String * _String_init_fromString(String *fromString) {
+String *self = malloc(sizeof(String));
+self->data = malloc(fromString->size+ 1);
+self->size = fromString->size;
+self->length = fromString->length;
+for(int i = 0;
+i < fromString->length;
+i ++)self->data[i]= fromString->data[i];
+self->data[self->length]= 0;
+return self;
 }
-// called with cursor at token following open paren
-static char * create_function_call(char *scope, char* scope_var, char *identifier) {
-    char * arg_labels[8 * MAX_ARG_COUNT],
-    *args[8 * MAX_ARG_COUNT],
-    *arg_string,
-    *result,
-    error_message[200];
-    int arg_count = 0;
-
-    cursor++; // skip open paren
-    // collect args
-    while (tokens[cursor]->type != CLOSE_PAREN && arg_count < MAX_ARG_COUNT) {
-        if (tokens[cursor]->type != IDENTIFIER) {
-            snprintf(error_message, 200, "Syntax Error: expected identifier. Instead found %s inside method call %s", tokens[cursor]->string, identifier);
-            error(error_message);
-        }
-        
-        if (tokens[cursor + 1]->type != COLON) {
-            snprintf(error_message, 200, "Syntax Error: expected colon. instead found %s inside method call %s", tokens[cursor]->string, identifier);
-            error(error_message);
-        }
-        
-        // collect label and then collect string until comma
-        arg_labels[arg_count] = tokens[cursor]->string;
-        arg_string = "";
-        cursor += 2; // skip colon
-        while (tokens[cursor]->type != COMMA && tokens[cursor]->type != CLOSE_PAREN) {
-            arg_string = append(arg_string, tokens[cursor]->string);
-            cursor++;
-        }
-        args[arg_count++] = arg_string;
-
-        if (tokens[cursor]->type == COMMA)
-            cursor++;
-    }
-    
-    result = generate_method_signature(scope, identifier, arg_labels, arg_count);
-
-    result = append(result, "(");
-
-    for (int i = 0; i < arg_count; i++) {
-        result = append(result, args[i]);
-        result = append(result, ", ");
-    }
-
-    if (scope && scope_var) {
-        result = append(result, scope_var);
-    }
-
-    if (result[strlen(result)] == ' ')
-        result[strlen(result) - 2] = 0; // ignore the last comma
-    
-    result = append(result, ")");
-    cursor++; // increment past close paren
-    return result;
+String * _String_init_fromCString(char *fromCString) {
+String *self = malloc(sizeof(String));
+self->length = strlen(fromCString);
+self->size = 2 * self->length;
+self->data = malloc(self->size + 1);
+for(int i = 0;
+i < self->length;
+i ++)self->data[i]= fromCString[i];
+self->data[self->length]= 0;
+return self;
 }
-// does not support id.id.id
-static char * gather_body(char *result, char *scope) {
-    // handle function body
-    int bracket_depth = 1;
-    char *temp;
-    while (cursor < token_count && bracket_depth > 0) {
-        if (tokens[cursor]->type == OPEN_CURL_BRACE) {
-            bracket_depth++;
-// SCOPE CHANGE
-            symbol_top_stack[symbol_top_stack_top++] = symbol_table_top;
-        } else if (tokens[cursor]->type == CLOSE_CURL_BRACE) {
-            bracket_depth--;
-// SCOPE CHANGE
-            if (bracket_depth > 0) // because we started bracket_depth at 1
-                symbol_table_top = symbol_top_stack[--symbol_top_stack_top];
-        } else if (tokens[cursor]->type == VAR || tokens[cursor]->type == LET) { // init definition call
-            if (tokens[cursor + 1]->type != IDENTIFIER)
-                error("Syntax Error: expected identifier");
-            temp = variable_declaration(); // get the string and update symbol table
-
-            temp[strlen(temp) - 2] = 0; // remove the semicolon
-            result = append(result, temp);
-            
-            if (tokens[cursor]->type != EQ) {
-                continue; // valid
-            }
-            if (!type_name(tokens[cursor + 1])) {
-                // not init call...
-                result = append(result, " = ");
-                cursor++; // advance past eq sign
-                continue;
-            }
-            if (tokens[cursor + 2]->type != OPEN_PAREN)
-                error("Syntax Error: expected parenthesis following type name");
-            result = append(result, " = ");
-            cursor += 2; // cursor needs to be at open_paren when function is called
-            result = append(result, create_function_call(tokens[cursor - 1]->string, NULL, "init"));
-            continue;
-//         else if (type_name(tokens[cursor]) && tokens[cursor + 1]->type == IDENTIFIER) {
-// // symbol table manip
-//             symbol_table_keys[symbol_table_top] = tokens[cursor + 1]->string;
-//             symbol_table_values[symbol_table_top++] = tokens[cursor]->string;
-//             cursor += 2;
-//             // result = append(result, tokens[cursor + 1]->string)
-//             continue;
-//         }
-         } else if (tokens[cursor]->type == SELF) {
-            if (tokens[cursor + 1]->type == DOT) {
-                if (tokens[cursor + 2]->type != IDENTIFIER)
-                    error("Syntax Error");
-                char *temp_identifier = tokens[cursor + 2]->string;
-                // two cases: var or func
-                if (tokens[cursor + 3]->type == OPEN_PAREN) { // func case 2
-                    // gather function params and their types
-                    cursor += 3;
-                    result = append(result, create_function_call(scope, "self", temp_identifier));
-                    continue;
-                } else { // variable case 3
-                    // static
-                    if (array_contains_string(static_vars, static_vars_count, temp_identifier)) {
-                        result = append(result, generate_static_name(scope, temp_identifier));
-                        result = append(result, " ");
-                    } else {
-                        result = append(result, "self");
-                        result = append(result, "->");
-                        result = append(result, temp_identifier);
-                        result = append(result, " ");
-                    }
-                    
-                    cursor += 3;
-                    continue;
-                }
-            }
-        } else if (tokens[cursor]->type == IDENTIFIER && tokens[cursor + 1]->type == DOT && tokens[cursor + 2]->type == IDENTIFIER) {
-            // 2 cases
-            // case 1 varid.funcid
-            char *typename, 
-            *variable_identifier = tokens[cursor]->string,
-            *second_identifier = tokens[cursor + 2]->string;
-            if (!(typename = type_name_for_symbol(tokens[cursor]->string))) {
-                error("Error: dot operator on invalid typename");
-            }
-
-            if (tokens[cursor + 3]->type == OPEN_PAREN) {
-                cursor += 3;
-                result = append(result, create_function_call(typename, variable_identifier, second_identifier));
-                continue;
-            } else {
-                result = append(result, variable_identifier);
-                result = append(result, "->");
-                result = append(result, second_identifier);
-                cursor += 3;
-                continue;
-            }  
-        }
-
-        if (tokens[cursor]->type == CLOSE_CURL_BRACE) {
-            result = append(result, "}\n");
-        } else if (tokens[cursor]->type == SEMICOLON) {
-            if (result[strlen(result) - 1] == ' ')
-                result[strlen(result) - 1] = 0;
-            result = append(result, tokens[cursor]->string);
-            result = append(result, "\n");
-        } else if (tokens[cursor]->type == OPEN_BRACE || tokens[cursor]->type == OPEN_PAREN || tokens[cursor]->type == CLOSE_BRACE || tokens[cursor]->type == CLOSE_PAREN) {
-            if (result[strlen(result) - 1] == ' ')
-                result[strlen(result) - 1] = 0;
-            result = append(result, tokens[cursor]->string);
-        } else {
-            result = append(result, tokens[cursor]->string);
-            result = append(result, " ");
-        }
-        cursor++;
-    }
-    return result;
+void _String_resize(String *self) {
+self->size *= 2;
+self->data = realloc(self->data , self->size + 1);
 }
-
-static char * function_definition(char *scope) {
-    if (cursor + 4 >= token_count) return NULL; // shortest possible func id()
-    if (tokens[cursor]->type == FUNC || tokens[cursor]->type == INIT) {
-        if (tokens[cursor]->type == FUNC && tokens[cursor + 1]->type != IDENTIFIER) {
-            printf("%d\n", tokens[cursor + 1]->type);
-            puts(tokens[cursor + 1]->string);
-            error("Syntax Error: Expected identifier following 'func' keyword");
-        }
-
-        const int e_length = 200;
-        char error_message[e_length], 
-        *result = "",
-        *identifier,
-        *arg_string = "(",
-        **arg_labels = malloc(MAX_ARG_COUNT);
-// SCOPE CHANGE
-        symbol_top_stack[symbol_top_stack_top++] = symbol_table_top;
-        int is_init = 0;
-
-        if (tokens[cursor]->type == INIT) {
-            is_init = 1;
-            identifier = tokens[cursor]->string;
-            cursor--;
-        } else {
-            identifier = tokens[cursor + 1]->string;
-        }
-
-// symbol table manip 
-// this feature won't work without storing separate table for each class
-        // if (scope) {
-        //     symbol_table_keys[symbol_table_top] = identifier;
-        //     symbol_table_keys[symbol_table_top++] = scope;
-        // }
-    
-        if (tokens[cursor + 2]->type != OPEN_PAREN) {
-            snprintf(error_message, 200, "Syntax Error: Expected parenthesis following function name '%s'", identifier);
-            error(error_message);
-        }
-        
-        cursor += 3;
-        int arg_count = 0, paren_arg = 0;
-        // get arguments
-        while (cursor < token_count - 2 && tokens[cursor]->type != CLOSE_PAREN) {
-            if (tokens[cursor]->type == IDENTIFIER) {
-                char *arg_identifier = tokens[cursor]->string;
-                if (tokens[cursor + 1]->type != COLON) {
-                    snprintf(error_message, e_length, "Syntax Error: expected colon following identifier. params '%s'", identifier);
-                    error(error_message);
-                } else if (!type_specifier(tokens[cursor + 2]) && tokens[cursor + 2]->type != OPEN_BRACE) {
-                    snprintf(error_message, e_length, "Syntax Error: expected type specifier or array following identifier. params '%s'", identifier);
-                    error(error_message);
-                }
-
-                if (tokens[cursor + 2]->type == OPEN_BRACE) {
-                    paren_arg = 1;
-                    cursor++; // skip paren
-                }
-                char *arg_type = tokens[cursor + 2]->string, *arg = arg_count > 0 ? ", " : "";
-                arg = append(arg, arg_type);
-
-                arg = append(arg, " ");
-
-                if (paren_arg) arg = append(arg, "*");
-
-                cursor += 3;
-                while(tokens[cursor]->type == OP_MUL) {
-                    arg = append(arg, "*");
-                    cursor++;
-                }
-                if (type_name_string(arg_type))
-                    arg = append(arg, "*");
-                arg = append(arg, arg_identifier);
-
-                if (paren_arg) {
-                    cursor++;
-                    paren_arg = 0;
-                }
-
-                // if (type_name_string(arg_type)) { // have to convert to pointer
-                    // arg = malloc(strlen(arg_identifier) + strlen(arg_type) + (arg_count > 0 ? 5 : 3)); // space + , + space + * + 1
-                //     sprintf(arg, arg_count > 0 ? ", %s *%s" : "%s *%s", arg_type, arg_identifier);
-                // } else {
-                    // arg = malloc(strlen(arg_identifier) + strlen(arg_type) + (arg_count > 0 ? 4 : 2)); // space + , + space + 1
-                //     sprintf(arg, arg_count > 0 ? ", %s %s" : "%s %s", arg_type, arg_identifier);
-                // }
-                arg_string = append(arg_string, arg);
-                arg_labels[arg_count++] = arg_identifier;
- // symbol table here               
-                symbol_table_keys[symbol_table_top] = arg_identifier;
-                symbol_table_values[symbol_table_top++] = arg_type;
-
-                continue;
-            }
-            cursor++;
-        }
-        if (scope && !is_init) {
-            if (arg_count > 0)
-                arg_string = append(arg_string, ", ");
-            char *temp = malloc(strlen(scope) + 7);
-            sprintf(temp, "%s *self", scope);
-            arg_string = append(arg_string, temp);
-        }
-        
-        // now two cases, assume void or explicit return type
-
-        if (is_init) {
-            if (!scope)
-                error("Error: init outside of class declaration");
-            result = scope;
-            result = append(result, " * ");
-            cursor += 2;
-        } else if (tokens[cursor + 1]->type == RETURN_SYMBOL) {
-            if (!type_specifier(tokens[cursor + 2])) {
-                snprintf(error_message, e_length, "Syntax Error: Expected type specifier following return annotation. Function '%s'", identifier);
-                error(error_message);
-            }
-            char *typename = tokens[cursor + 2]->string;
-            result = typename;
-            result = append(result, " ");
-            cursor += 3;
-            while(tokens[cursor]->type == OP_MUL) {
-                result = append(result, "*");
-                cursor++;
-            }
-            if (type_name_string(typename))
-                result = append(result, "* ");
-            else
-                result = append(result, " ");
-            cursor++; // might be wrong
-        } else {
-            result = "void ";
-            cursor += 2;
-        }
-
-        result = append(result, generate_method_signature(scope, identifier, arg_labels, arg_count)); // FIXME need to generate unique name
-        result = append(result, arg_string);
-        result = append(result, ") {\n");
-
-        // if init, need to add the allocation code
-        if (is_init) {
-            // we know there's scope because already checked
-            char temp[100];
-            snprintf(temp, 100, "%s *self = malloc(sizeof(%s));\n", scope, scope);
-            result = append(result, temp);
-        }
-
-        // if a segmentation fault happens in here, somebody did bad brackets
-        result = gather_body(result, scope);
-        if (is_init) {
-            result[strlen(result) - 2] = 0; // ignore the "}\n"
-            result = append(result, "return self;\n");
-            result = append(result, "}\n");
-        }
-// SCOPE CHANGE
-        symbol_table_top = symbol_top_stack[--symbol_top_stack_top];
-
-        return result;
-    }
-    return NULL;
+void _String_resize_size(int size, String *self) {
+self->size = size;
+self->data = realloc(self->data , self->size + 1);
 }
-
-static char * class_definition() {
-    if (cursor + 3 >= token_count || tokens[cursor]->type != CLASS) // minimum is class id {}
-        return NULL;
-    else if (tokens[cursor + 1]->type != IDENTIFIER) 
-        error("Syntax Error: expected identifier in class declaration");
-    else if (tokens[cursor + 2]->type != OPEN_CURL_BRACE)
-        error("Syntax Error: expected open bracket for class declaration");
-// SCOPE CHANGE
-    symbol_top_stack[symbol_top_stack_top++] = symbol_table_top; // save cursor on stack
-
-    char *struct_def = "\ntypedef struct {\n", 
-    *method_defs = "", 
-    *new_item = "", 
-    *identifier = tokens[cursor + 1]->string,
-    *end = malloc(4 + strlen(identifier)); // close + semicolon + id + space + nl
-    sprintf(end, "} %s;\n", identifier);
-    // gather symbol
-    udt_table[udt_count++] = identifier;
-
-    cursor += 3;
-    // at this point, we should be inside the open curly bracket
-    while (cursor < token_count && tokens[cursor]->type != CLOSE_CURL_BRACE) {
-        // try to get variable
-        if ((new_item = variable_declaration())) {
-            struct_def = append(struct_def, new_item);
-        } else if ((new_item = function_definition(identifier))) {
-            method_defs = append(method_defs, new_item);
-        } else if ((new_item = static_variable_definition(identifier))) {
-            method_defs = append(method_defs, new_item);
-        } else {
-            // actually there must be an error...
-            puts(identifier);
-            puts(tokens[cursor]->string);
-            puts(tokens[cursor + 1]->string);
-            error("Syntax Error: Expected variable or method definition");
-        }
-    }
-    cursor++; // close curl bracket
-
-// SCOPE CHANGE
-    symbol_table_top = symbol_top_stack[--symbol_top_stack_top];
-    // printf("cursor: %ld, token_count: %ld\n", cursor, token_count);
-    struct_def = append(struct_def, end);
-    struct_def = append(struct_def, method_defs);
-    return struct_def;
+void _String_append_c(char c, String *self) {
+if(self->length + 1 > self->size * _String_LOAD_FACTOR)_String_resize(self);
+self->data[self->length ++]= c;
+self->data[self->length]= 0;
 }
-
-static char * first_pass() {
-    char *result = "#include <stdio.h>\n", *temp;
-    while (cursor < token_count) {
-        if ((temp = class_definition())) {
-            result = append(result, temp);
-        } else if ((temp = function_definition(NULL))) {
-            result = append(result, temp);
-        } else {
-            // look for code to convert
-            if (tokens[cursor]->type == OPEN_CURL_BRACE) {
-                result = append(result, "{\n");
-                cursor++;
-                result = gather_body(result, NULL);
-            } else {
-                result = append(result, tokens[cursor]->string);
-            }
-            result = append(result, " ");
-            cursor++;
-        }
-    }
-    return result;
+char  _String_charAt_index(int index, String *self) {
+if(index >= self->length)return - 1;
+return self->data[index];
 }
-
-void parse(const char *infile, const char *outfile) {
-    FILE *input = fopen(infile, "r"), *output = fopen(outfile, "w");
-    if (!input)
-        error("Error: file not found");
-    tokens = malloc(sizeof(Token *) * MAX_TOKEN_NUM);
-    token_count = tokenize(infile, tokens, MAX_TOKEN_NUM);
-
-    udt_table = malloc(8 * MAX_UDT_COUNT);
-    symbol_table_keys = malloc(8 * MAX_SYMBOL_TABLE_COUNT);
-    symbol_table_values = malloc(8 * MAX_SYMBOL_TABLE_COUNT);
-
-    static_vars = malloc(MAX_STATIC_VARS);
-
-    // printf("token count: %ld\n", token_count);
-    // for (int i = 0; i < token_count; i++) {
-    //     printf("index: %d, type: %d, value: %s\n", i, tokens[i]->type, tokens[i]->string);
-    // }
+void _String_append_string(String *string, String *self) {
+if(self->length + string->length> self->size * _String_LOAD_FACTOR){
+	const int t = 2 *(self->length + string->length);
+_String_resize_size(t, self);
+}
+for(int i = self->length;
+i < string->length+ self->length;
+i ++)self->data[i]= _String_charAt_index(i, string);
+self->length += string->length;
+self->data[self->length]= 0;
+}
+void _String_append_cstring(char *cstring, String *self) {
+	const int len = strlen(cstring);
+if(self->length + len > self->size * _String_LOAD_FACTOR){
+	const int t = 2 *(self->length + len);
+_String_resize_size(t, self);
+}
+for(int i = self->length;
+i < self->length + len;
+i ++)self->data[i]= cstring[i];
+self->length += len;
+self->data[self->length]= 0;
+}
+char * _String_cString(String *self) {
+return self->data;
+}
+unsigned char  _String_equals_string(String *string, String *self) {
+if(string->length!= self->length)return 0;
+for(int i = 0;
+i < string->length;
+i ++)if(string->data[i]!= self->data[i])return 0;
+return 1;
+}
+void _String_print(String *self) {
+puts(self->data);
+}
+static const int _StringArray_DEFAULT_SIZE = 8;
+static const double _StringArray_LOAD_FACTOR = 0.6;
+StringArray * _StringArray_init() {
+StringArray *self = malloc(sizeof(StringArray));
+self->data = malloc(sizeof(String *)* _StringArray_DEFAULT_SIZE);
+self->size = _StringArray_DEFAULT_SIZE;
+self->count = 0;
+return self;
+}
+StringArray * _StringArray_init_fromArray_length(String **fromArray, int length) {
+StringArray *self = malloc(sizeof(StringArray));
+self->size = length * 2;
+self->data = malloc(sizeof(String *)* self->size);
+self->count = length;
+return self;
+}
+void _StringArray_deinit(StringArray *self) {
+free(self->data);
+free(self);
+}
+String * _StringArray_getValue_atIndex(int atIndex, StringArray *self) {
+if(atIndex >= self->count)return NULL;
+return self->data[atIndex];
+}
+void _StringArray_resize(StringArray *self) {
+self->size *= 2;
+self->data = realloc(self->data , sizeof(String *)* self->size);
+}
+void _StringArray_append_value(String *value, StringArray *self) {
+if(self->count > _StringArray_LOAD_FACTOR * self->size){
+_StringArray_resize(self);
+}
+self->data[self->count ++]= value;
+}
+String * _StringArray_pop(StringArray *self) {
+return self->data[-- self->count];
+}
+String * _StringArray_remove_atIndex(int atIndex, StringArray *self) {
+	String *result = self->data[atIndex];
+for(int i = atIndex;
+i < self->count - 1;
+i ++)self->data[i]= self->data[i + 1];
+return result;
+}
+#include "TokenType.h"
+ Token * _Token_init() {
+Token *self = malloc(sizeof(Token));
+self->type = NONE;
+self->string = _String_init();
+return self;
+}
+Token * _Token_init_type_string(int type, String *string) {
+Token *self = malloc(sizeof(Token));
+self->type = type;
+self->string = string;
+return self;
+}
+static const int _TokenArray_DEFAULT_SIZE = 8;
+static const double _TokenArray_LOAD_FACTOR = 0.6;
+TokenArray * _TokenArray_init() {
+TokenArray *self = malloc(sizeof(TokenArray));
+self->data = malloc(sizeof(String *)* _TokenArray_DEFAULT_SIZE);
+self->size = _TokenArray_DEFAULT_SIZE;
+self->count = 0;
+return self;
+}
+TokenArray * _TokenArray_init_fromArray_length(String **fromArray, int length) {
+TokenArray *self = malloc(sizeof(TokenArray));
+self->size = length * 2;
+self->data = malloc(sizeof(String *)* self->size);
+self->count = length;
+return self;
+}
+void _TokenArray_deinit(TokenArray *self) {
+free(self->data);
+free(self);
+}
+Token * _TokenArray_getValue_atIndex(int atIndex, TokenArray *self) {
+if(atIndex >= self->count)return NULL;
+return self->data[atIndex];
+}
+void _TokenArray_resize(TokenArray *self) {
+self->size *= 2;
+self->data = realloc(self->data , sizeof(String *)* self->size);
+}
+void _TokenArray_append_value(Token *value, TokenArray *self) {
+if(self->count > _TokenArray_LOAD_FACTOR * self->size){
+_TokenArray_resize(self);
+}
+self->data[self->count ++]= value;
+}
+Token * _TokenArray_pop(TokenArray *self) {
+return self->data[-- self->count];
+}
+Token * _TokenArray_remove_atIndex(int atIndex, TokenArray *self) {
+	Token *result = self->data[atIndex];
+for(int i = atIndex;
+i < self->count - 1;
+i ++)self->data[i]= self->data[i + 1];
+return result;
+}
+Lexer * _Lexer_init() {
+Lexer *self = malloc(sizeof(Lexer));
+self->cursor = 0;
+self->input = _String_init();
+self->tokens = _TokenArray_init();
+return self;
+}
+unsigned char  _Lexer_inline_space(Lexer *self) {
+	String *s = self->input;
+	char c = _String_charAt_index(self->cursor, s);
+if(c == 20 || c == 9){
+self->cursor ++;
+return 1;
+}
+return 0;
+}
+unsigned char  _Lexer_line_break(Lexer *self) {
+	String *s = self->input;
+	char c = _String_charAt_index(self->cursor, s);
+if(c == 10){
+self->cursor ++;
+return 1;
+}
+else if(c == 13){
+c = _String_charAt_index(self->cursor+1, s);
+if(c == 10){
+self->cursor += 2;
+return 1;
+}
+self->cursor ++;
+return 1;
+}
+return 0;
+}
+unsigned char  _Lexer_whitespace(Lexer *self) {
+return 0;
+}
+void _Lexer_lex_filename(char *filename, Lexer *self) {
+FILE * file = fopen(filename , "r");
+	String *s = self->input;
+	char current_char = fgetc(file);
+while(! feof(file)){
+_String_append_c(current_char, s);
+current_char = fgetc(file);
+}
+}
+Parser * _Parser_init() {
+Parser *self = malloc(sizeof(Parser));
+return self;
+}
+void _Parser_parse_filename(char *filename, Parser *self) {
+}
+void _Parser_line_break(Parser *self) {
+}
+int main ( ) {
+	Lexer *lexer = _Lexer_init();
+_Lexer_lex_filename("parser.lws", lexer);
+return 0;
+}
  
-    fputs(first_pass(), output);
-
-}

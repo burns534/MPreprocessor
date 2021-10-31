@@ -1,5 +1,7 @@
 #include "lexer.h"
 
+// #define DEBUG_LEX 1
+
 static int isalpha(char c) {
     // printf("isalpha: %d\n", c);
     return c < 123 && c > 96 || c > 64 && c < 91;
@@ -38,6 +40,7 @@ static const char * keywords[NUM_KEYWORDS] = {
     "void",
     "ulong",
     "bool",
+    "nil",
     "class",
     "super",
     "self",
@@ -66,15 +69,17 @@ static int is_keyword(char *string) {
 // also can't have a string literal longer than 255 bytes
 static Token * get_string_literal(FILE *file) {
     char current_char, *token_string = malloc(TOKEN_MAX_LENGTH);
-    int i = 0;
+    token_string[0] = '"';
+    int i = 1;
     for(; i < TOKEN_MAX_LENGTH - 1; i++) {
         current_char = fgetc(file);
         if (current_char == '"') {
-            token_string[i] = 0;
+            token_string[i] = current_char;
             break;
         }
         token_string[i] = current_char;
     }
+    token_string[i + 1] = 0;
     return create_token(STRING_LITERAL, token_string);
 }
 
@@ -117,6 +122,8 @@ static Token * get_string_token(FILE *file, char first_char) {
         token_string = "1";
     else if (matched_keyword && strcmp(keywords[index], "false") == 0)
         token_string = "0";
+    else if (matched_keyword && strcmp(keywords[index], "nil") == 0)
+        token_string = "NULL";
     return create_token(matched_keyword ? index: IDENTIFIER, token_string);
 }
 
@@ -124,7 +131,6 @@ static void error(const char *message) {
     perror(message);
     exit(EXIT_FAILURE);
 }
-
 
 // return number of tokens
 int tokenize(const char *filename, Token **tokens, int tokens_length) {
@@ -145,14 +151,30 @@ int tokenize(const char *filename, Token **tokens, int tokens_length) {
         else {
             switch(current_char) {
                 case '#': {
-                    // get macro
-                    char *buffer = malloc(100), buffer_index = 1;
-                    buffer[0] = '#';
-                    while ((current_char = fgetc(file)) != '>')
+                    // get include
+                    char *buffer = malloc(100), buffer_index = 10, condition = '"';
+                    // skip whitespace
+                    while (current_char != '"' && current_char != '<') 
+                        current_char = fgetc(file);
+                    snprintf(buffer, 100, "#include %c", current_char);
+
+                    if (current_char == '<')
+                        condition = '>';
+                    while ((current_char = fgetc(file)) != condition)
                         buffer[buffer_index++] = current_char;
                     buffer[buffer_index] = current_char;
+                    buffer[buffer_index + 1] = '\n';
+                    buffer[buffer_index + 2] = 0;
                     tokens[token_count++] = create_token(INCLUDE_STATMENT, buffer);
                 } break;
+                case '!':
+                    if ((current_char = fgetc(file)) == '=')
+                        tokens[token_count++] = create_token(OP_NE, "!=");
+                    else {
+                        tokens[token_count++] = create_token(OP_NOT, "!");
+                        backtrack(file, 1);
+                    }
+                    break;
                 case ' ':
                     break;
                 case '(':
@@ -267,6 +289,18 @@ int tokenize(const char *filename, Token **tokens, int tokens_length) {
                     break;
                 case '"':
                     tokens[token_count++] = get_string_literal(file);
+                    break;
+                case '&':
+                    if ((current_char = fgetc(file)) == '&')
+                        tokens[token_count++] = create_token(OP_AND, "&&");
+                    else
+                        backtrack(file, 2);
+                    break;
+                case '|':
+                    if ((current_char = fgetc(file)) == '|')
+                        tokens[token_count++] = create_token(OP_OR, "||");
+                    else
+                        backtrack(file, 2);
                     break;
                 default: // is keyword or other
                     break;

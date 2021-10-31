@@ -1,10 +1,11 @@
 #ifndef TOKEN_TYPE_H
 #define TOKEN_TYPE_H
 #pragma once
-#define NUM_KEYWORDS 29
+#define NUM_KEYWORDS 30
 // has to be in specific order for indexing to work
 // does not have bitwise ops
 typedef enum {
+    NONE,
     IF, 
     ELSE,
     SWITCH,
@@ -29,8 +30,9 @@ typedef enum {
     LONG,               // long
     CHAR,               // char
     VOID,               // void
-    ULONG,           // ulong
-    BOOL,
+    ULONG,              // ulong
+    BOOL,               // bool
+    NIL,                // nil
 
     // class
     CLASS,              // class
@@ -50,6 +52,7 @@ typedef enum {
     OP_GE,              // >=
     OP_LE,              // <=
     OP_EQ,              // ==
+    OP_NE,              // !=
     OP_MOD,             // %
     OP_MUL_EQ,          // *=
     OP_DIV_EQ,          // /=
@@ -57,6 +60,7 @@ typedef enum {
     OP_SUB_EQ,          // -=
     OP_INC,             // ++
     OP_DEC,             // --
+    OP_NOT,             // !
     OPEN_BRACE,         // [
     CLOSE_BRACE,        // ]
     OPEN_CURL_BRACE,    // {
@@ -75,10 +79,5 @@ typedef enum {
     INCLUDE_STATMENT    // #include <[a-Z | "]>
 
 } TokenType;
-
-static TokenType type_specifiers[8] = {
-    FLOAT, INT, DOUBLE, LONG, CHAR, VOID, ULONG, BOOL
-};
-
 
 #endif

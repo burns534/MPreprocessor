@@ -5,7 +5,7 @@
 #include <string.h>
 #include "Token.h"
 
-#define TOKEN_MAX_LENGTH 256
+#define TOKEN_MAX_LENGTH 512
 
 /**
  * Accepts file name, token array, and token array length and populates array or returns -1 for error

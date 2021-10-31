@@ -2,3 +2,5 @@
 test
 *.lws
 lws
+test.c
+parser

@@ -3,6 +3,10 @@
         "tokenizer.h": "c",
         "token.h": "c",
         "stdio.h": "c",
-        "*.txt": "c"
+        "*.txt": "c",
+        "chrono": "cpp",
+        "compiler.h": "c",
+        "stdlib.h": "c",
+        "iterator": "c"
     }
 }
