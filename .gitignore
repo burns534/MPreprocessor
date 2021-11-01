@@ -1,6 +1,5 @@
 *.txt
 test
 *.lws
-lws
-test.c
 parser
+testing/*
