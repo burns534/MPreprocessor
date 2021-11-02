@@ -1,8 +1,10 @@
+#include <stdbool.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
 #ifndef TOKEN_TYPE_H
 #define TOKEN_TYPE_H
-#pragma once
-#include <stdbool.h>
-#include <string.h>
 // has to be in specific order for indexing to work
 // does not have bitwise ops
 typedef enum {
@@ -71,6 +73,13 @@ typedef enum {
     WEAK,
     WILLSET,
 
+    INFIX,
+    OPTIONAL,
+    POSTFIX,
+    PREFIX,
+    UNOWNED,
+    PRECEDENCEGROUP,
+
     // used in patterns
     WILDCARD,
 
@@ -120,7 +129,7 @@ typedef enum {
 
 } TokenType;
 
-static char * lookup_table[] = {
+static char * tt_string_table[] = {
     "NONE", 
     "BREAK",
     "CASE",
@@ -181,6 +190,13 @@ static char * lookup_table[] = {
     "SET",
     "WEAK",
     "WILLSET",
+
+    "INFIX",
+    "OPTIONAL",
+    "POSTFIX",
+    "PREFIX",
+    "UNOWNED",
+    "PRECEDENCEGROUP",
 
     "WILDCARD",
 
@@ -283,14 +299,31 @@ static char *keyword_table[] = {
     "required",
     "set",
     "weak",
-    "willset"
+    "willset",
+
+    "infix",
+    "optional",
+    "postfix",
+    "prefix",
+    "unowned",
+    "precedencegroup"
 };
 
-char * token_type_to_string(TokenType t) {
-    return lookup_table[t];
+typedef struct {
+    TokenType type;
+    char *value, *filename;
+    size_t line_number, character;
+} Token;
+
+static char * token_type_to_string(TokenType t) {
+    return tt_string_table[t];
 }
 
-char * keyword_for_type(TokenType t) {
+static void print_token(Token *t) {
+    printf("%s %s %s %lu %lu\n", token_type_to_string(t->type), t->value, t->filename, t->line_number, t->character);
+}
+
+static char * keyword_for_type(TokenType t) {
     if (t > 55 || t < 1) {
         perror("invalid type");
         exit(1);
@@ -298,7 +331,7 @@ char * keyword_for_type(TokenType t) {
     return keyword_table[t - 1];
 }
 
-int is_keyword(char *s) {
+static int is_keyword(char *s) {
     for (int i = 0; i < 56; i++) {
         if (strcmp(s, keyword_table[i]) == 0)
             return i;
@@ -307,3 +340,4 @@ int is_keyword(char *s) {
 }
 
 #endif
+#pragma once
