@@ -1,14 +1,14 @@
 #include "v2parser.h"
 
 #define CURSOR_STACK_DEPTH 4096
-#define CHILD_BUFFER_SIZE 4096
+// #define CHILD_BUFFER_SIZE 4096
 #define ARGUMENT_LIST_MAX 32
+#define DEFAULT_CHILD_SIZE 8
 
 static Token **tokens;
-static size_t tc, bi = 0, cur = 0;
+static size_t tc, cur = 0;
 static map *primitive_types, *type_names;
 static size_t cursor_stack[4096], cursor_stack_top = 0;
-static ASTNode *buf[CHILD_BUFFER_SIZE];
 
 static void error(char *fmt, ...) {
     
@@ -59,36 +59,62 @@ static inline int push() {
     return 1;
 }
 
+static bool add_child(ASTNode *c, ASTNode *p) {
+    if (!c || !p) return false;
+    if (p->child_count > 0.6 * p->children_size)
+        p->children = realloc(p->children, p->children_size *= 2);
+    p->children[p->child_count++] = c;
+    return true;
+}
+
+static void pop_child(ASTNode *p) {
+    if (p->child_count > 0)
+        p->child_count--;
+}
+
 static ASTNode * create_node(ASTNodeType type) {
     ASTNode *result = malloc(sizeof(ASTNode));
     result->child_count = 0;
+    result->children_size = DEFAULT_CHILD_SIZE;
     result->type = type;
+    result->children = malloc(sizeof(ASTNode *) * DEFAULT_CHILD_SIZE);
     return result;
 }
 
-static ASTNode * create_node_withvalue(ASTNodeType type, char *v) {
+static ASTNode * create_node_with_child(ASTNodeType type, ASTNode *child) {
+    ASTNode *result = malloc(sizeof(ASTNode));
+    result->child_count = 1;
+    result->children_size = DEFAULT_CHILD_SIZE;
+    result->type = type;
+    result->children = malloc(sizeof(ASTNode *) * DEFAULT_CHILD_SIZE);
+    *result->children = child;
+    return result;
+}
+
+static ASTNode * create_node_with_value(ASTNodeType type, char *v) {
     ASTNode *result = malloc(sizeof(ASTNode));
     result->child_count = 0;
+    result->children_size = DEFAULT_CHILD_SIZE;
     result->type = type;
     result->value = v;
+    result->children = malloc(sizeof(ASTNode *) * DEFAULT_CHILD_SIZE);
     return result;
 }
 
+// static inline void set_children(ASTNode *n) {
+//     n->children = malloc(bi * sizeof(ASTNode *));
+//     n->child_count = bi;
+//     bi = 0;
+//     for (int i = 0; i < bi; i++)
+//         n->children[i] = buf[i];
+// }
 
-static inline void set_children(ASTNode *n) {
-    n->children = malloc(bi * sizeof(ASTNode *));
-    n->child_count = bi;
-    bi = 0;
-    for (int i = 0; i < bi; i++)
-        n->children[i] = buf[i];
-}
-
-static inline void set_value(char *s, ASTNode *n) {
-    size_t len = strlen(s);
-    n->value = malloc(len + 1);
-    strcpy(n->value, s);
-    n->value[len] = 0;
-}
+// static inline void set_value(char *s, ASTNode *n) {
+//     size_t len = strlen(s);
+//     n->value = malloc(len + 1);
+//     strcpy(n->value, s);
+//     n->value[len] = 0;
+// }
 
 static void print_node(ASTNode *node) {
     if (!node) return;
@@ -118,9 +144,23 @@ void print_tree(ASTNode *root) {
     print_tree_util(root, 0);
 }
 
-// make the lexer do this
-static ASTNode * floating_point_literal() {
-    return NULL;
+#define PRIMITIVE_TYPES 9
+
+static char *primitive_types_array[PRIMITIVE_TYPES] = {
+    "bool",
+    "ulong",
+    "uint",
+    "double",
+    "float",
+    "long",
+    "char",
+    "void",
+    "int"
+};
+
+// for primitives
+static inline bool primitive_type() {
+    return tokens[cur]->type == IDENTIFIER && map_contains(tokens[cur]->value, primitive_types);
 }
 
 // seems like I'm losing useful type information here that I need later...
@@ -158,9 +198,8 @@ static inline ASTNode * boolean_literal() {
 }
 
 static inline ASTNode * nil_literal() {
-    if (tokens[cur++]->type == NIL)
-        return create_node(NIL_LITERAL);
-    cur--;
+    if (tokens[cur]->type == NIL)
+        return create_node_with_value(NIL_LITERAL, tokens[cur++]->value);
     return NULL;
 }
 
@@ -174,68 +213,59 @@ static inline ASTNode * string_literal() {
 }
 
 static ASTNode * literal() {
-    if ((buf[0] = numeric_literal())
-    || (buf[0] = string_literal())
-    || (buf[0] = boolean_literal())
-    || (buf[0] = nil_literal())) {
-        ASTNode *result = create_node(LITERAL);
-        bi++;
-        set_children(result);
-        return result;
-    }
+    ASTNode *c;
+    if ((c = numeric_literal())
+    || (c = string_literal())
+    || (c = boolean_literal())
+    || (c = nil_literal())) 
+        return create_node_with_child(LITERAL, c);
+    return NULL;
+}
+
+static ASTNode * access_level_modifier() {
+    if (tokens[cur]->type == PRIVATE || tokens[cur]->type == PUBLIC)
+        return create_node_with_value(ACCESS_LEVEL_MODIFIER, tokens[cur++]->value);
     return NULL;
 }
 
 static ASTNode * binary_operator() {
-    if (tokens[cur]->type == OPERATOR) {
-        ASTNode *result = create_node(BINARY_OPERATOR);
-        result->value = tokens[cur++]->value;
-        return result;
-    }
+    if (tokens[cur]->type == OPERATOR) 
+        return create_node_with_value(BINARY_OPERATOR, tokens[cur++]->value);
     return NULL;
 }
 
 static ASTNode * prefix_operator() {
-    if (tokens[cur]->type == OPERATOR) {
-        ASTNode *result = create_node(PREFIX_OPERATOR);
-        result->value = tokens[cur++]->value;
-        return result;
-    }
+    if (tokens[cur]->type == OPERATOR) 
+        return create_node_with_value(PREFIX_OPERATOR, tokens[cur++]->value);
     return NULL;
 }
 
 static ASTNode * postfix_operator() {
-    if (tokens[cur]->type == OPERATOR) {
-        ASTNode *result = create_node(POSTFIX_OPERATOR);
-        result->value = tokens[cur++]->value;
-        return result;
-    }
+    if (tokens[cur]->type == OPERATOR) 
+        return create_node_with_value(POSTFIX_OPERATOR, tokens[cur++]->value);
     return NULL;
 }
 
-#define PRIMITIVE_TYPES 9
-
-static char *primitive_types_array[PRIMITIVE_TYPES] = {
-    "bool",
-    "ulong",
-    "uint",
-    "double",
-    "float",
-    "long",
-    "char",
-    "void",
-    "int"
-};
-
-// for primitives
-static inline bool primitive_type() {
-    return tokens[cur]->type == IDENTIFIER && map_contains(tokens[cur]->value, primitive_types);
+static ASTNode * type_name() {
+    if (tokens[cur]->type == IDENTIFIER && (primitive_type() || map_contains(tokens[cur]->value, type_names)))
+        return create_node_with_value(TYPE_NAME, tokens[cur++]->value);
+    return NULL;
 }
 
-static ASTNode * type_name() {
-    if (tokens[cur]->type == IDENTIFIER && (primitive_type() || map_contains(tokens[cur]->value, type_names))) {
-        ASTNode *result = create_node(TYPE_NAME);
-        result->value = tokens[cur++]->value;
+static ASTNode * generic_argument() {
+    ASTNode *c;
+    if ((c = type()))
+        return create_node_with_child(GENERIC_ARGUMENT, c);
+    return NULL;
+}
+
+static ASTNode * generic_argument_list() {
+    ASTNode *c;
+    if ((c = generic_argument())) {
+        ASTNode *result = create_node_with_child(GENERIC_ARGUMENT_LIST, c);
+        while (cur < tc && tokens[cur++]->type == COMMA) 
+            if (!add_child(generic_argument(), result))
+                error("expected type in generic argument list");
         return result;
     }
     return NULL;
@@ -244,176 +274,149 @@ static ASTNode * type_name() {
 // can't be empty
 // operator stores < and >
 static ASTNode * generic_argument_clause() {
-    if (tokens[cur]->type == OPERATOR && strcmp(tokens[cur]->value, "<") == 0 && push()) {
-        ASTNode *result = NULL;
-        cur++;
-        while(cur < tc && (buf[bi] = type())) {
-            bi++;
-            cur++;
-            if (cur < tc && tokens[cur]->type == COMMA) {
-                cur++;
-                continue;
-            } else {
-                break;
-            }
-        }
-
-        if (cur >= tc) // this might not be right
-            error("eof reached inside generic argument clause");
-            
-        if (strcmp(tokens[cur]->value, ">") != 0)
-            error("expected >");
-
-        if (bi > 0) { // we got arguments
-            result = create_node(GENERIC_ARGUMENT_CLAUSE);
-            set_children(result);
-        }
-
-        pop();
-        return result;
+    ASTNode *c;
+    if (push() 
+    && tokens[cur++]->subtype == '<'
+    && (c = generic_argument_list())
+    && tokens[cur++]->subtype == '>' && pop()) {
+        return create_node_with_child(GENERIC_ARGUMENT_CLAUSE, c);
     }
     pop_set();
     return NULL;
 }
 
 static ASTNode * type_identifier() {
-    if (push() && (buf[0] = type_name())) {
-        ASTNode *result = create_node(TYPE_IDENTIFIER);
-        if (push() && (buf[++bi] = generic_argument_clause())) {
-            if (cur < tc && tokens[cur]->type == OPERATOR && strcmp(tokens[cur]->value, ".") == 0) {
-                if (!(buf[++bi] = type_identifier()))
-                    error("expected type identifier following .");
-            }
-            // case 1 and 2
-            pop();
-        } else if (cur < tc && tokens[cur]->type == OPERATOR && strcmp(tokens[cur]->value, ".") == 0) {
-            // case 3
-            if (!(buf[++bi] = type_identifier()))
+    ASTNode *c;
+    if ((c = type_name())) {
+        ASTNode *result = create_node_with_child(TYPE_IDENTIFIER, c);
+        if (add_child(generic_argument_clause(), result)) {
+            if (cur < tc && tokens[cur]->subtype == '.') 
+                if (++cur && !add_child(type_identifier(), result))
+                    error("expected type identifier following dot");
+        } else if (cur < tc && tokens[cur]->subtype == '.') 
+            if (++cur && !add_child(type_identifier(), result))
                 error("expected type identifier following .");
-        } else {
-            pop();
-        }
-
-        // case 4
-        set_children(result);
-        pop();
+        
         return result;
     }
-    pop_set();
     return NULL;
 }
 
 static ASTNode * type_annotation() {
-    if (push() && tokens[cur]->type == COLON) {
-        cur++;
-        if (!(buf[0] = type()))
-            error("expected type following :");
+    if (push() && tokens[cur++]->type == COLON) {
         ASTNode *result = create_node(TYPE_ANNOTATION);
-        set_children(result);
-        pop();
+        if (!add_child(type(), result))
+            error("expected type following :");
         return result;
     }
     pop_set();
+    return NULL;
+}
+
+static ASTNode * element_name() {
+    if (tokens[cur]->type == IDENTIFIER)
+        return create_node_with_value(ELEMENT_NAME, tokens[cur++]->value);
+    return NULL;
+}
+
+static ASTNode * tuple_type_element() {
+    ASTNode *c;
+    if ((c = type()))
+        return create_node_with_child(TUPLE_TYPE_ELEMENT, c);
+    else if ((c = element_name())) {
+        ASTNode *result = create_node_with_child(TUPLE_TYPE_ELEMENT, c);
+        if (add_child(type_annotation(), result))
+            return result;
+        free(c);
+        free(result);
+    } 
+    return NULL;
+}
+
+static ASTNode * tuple_type_element_list() {
+    ASTNode *c;
+    if ((c = tuple_type_element())) {
+        ASTNode *result = create_node_with_child(TUPLE_TYPE_ELEMENT_LIST, c);
+        while(cur < tc && tokens[cur]->type == COMMA) 
+            if (++cur && !add_child(tuple_type_element(), result))
+                error("expected type element following comma");
+        return result;
+    }
     return NULL;
 }
 
 static ASTNode * tuple_type() {
-    if (push() && tokens[cur]->type == OPEN_PAREN) {
-        ASTNode *result = NULL;
-        cur++;
-        if (push() && (buf[0] = type())) {
-            bi++;
-            while(cur < tc && tokens[cur]->type == COMMA) {
-                cur++;
-                if (!(buf[bi++] = type()))
-                    error("expected type following ,");
-            }
-
-            pop();
-        } else {
-            if (tokens[cur]->type != CLOSE_PAREN)
-                error("expected )");
+    if (push() && tokens[cur++]->type == OPEN_PAREN) {
+        if (tokens[cur]->type == CLOSE_PAREN && ++cur)
+            return create_node(TUPLE_TYPE);
+        ASTNode *c;
+        if ((c = tuple_type_element())) {
+            if (tokens[cur++]->type != COMMA)
+                error("expected comma in tuple type");
+            ASTNode *result = create_node_with_child(TUPLE_TYPE, c);
+            if (!add_child(tuple_type_element_list(), result))
+                error("expected tuple type element list following comma");
+            return result;
         }
-        result = create_node(TUPLE_TYPE);
-        set_children(result);
-        pop();
-        return result;
     }
-    pop_set();
+    return NULL;
+}
+
+static ASTNode * argument_label() {
+    if (tokens[cur]->type == IDENTIFIER)
+        return create_node_with_value(ARGUMENT_LABEL, tokens[cur++]->value);
     return NULL;
 }
 
 static ASTNode * function_type_argument() {
-    if (push() && (buf[0] == type())) {
-        bi++;
-        ASTNode *result = create_node(FUNCTION_TYPE_ARGUMENT);
-        set_children(result);
-        pop();
-        return result;
-    } else if (tokens[cur++]->type == IDENTIFIER && (buf[0] = type_annotation())) {
-        bi++;
-        ASTNode *result = create_node(FUNCTION_TYPE_ARGUMENT);
-        set_children(result);
-        pop();
+    ASTNode *c;
+    if ((c = type())) 
+        return create_node_with_child(FUNCTION_TYPE_ARGUMENT, c);
+    if ((c = argument_label())) {
+        ASTNode *result = create_node_with_child(FUNCTION_TYPE_ARGUMENT, c);
+        if (!add_child(type_annotation(), result))
+            error("expected type annotation following argument label");
         return result;
     }
-    pop_set();
     return NULL;
 }
 
 static ASTNode * function_type_argument_list() {
-    if (push() && (buf[0] = function_type_argument())) {
-        bi++;
-        while(cur < tc && tokens[cur]->type == COMMA) {
-            cur++;
-            if (!(buf[bi++] = function_type_argument()))
-                error("expected function type argument");
-        }
-        ASTNode *result = create_node(FUNCTION_TYPE_ARGUMENT_LIST);
-        set_children(result);
-        pop();
+    ASTNode *c;
+    if ((c = function_type_argument())) {
+        ASTNode *result = create_node_with_child(FUNCTION_TYPE_ARGUMENT_LIST, c);
+        while(cur < tc && tokens[cur]->type == COMMA) 
+            if (++cur && !add_child(function_type_argument(), result))
+                error("expected type element following comma");
         return result;
     }
-    pop_set();
     return NULL;
 }
 
 static ASTNode * function_type_argument_clause() {
     if (tokens[cur]->type == OPEN_PAREN) {
-        cur++;
-        ASTNode *result = create_node(FUNCTION_TYPE_ARGUMENT_CLAUSE);
-        if (tokens[cur]->type == CLOSE_PAREN) {
-            cur++;
-            return result;
-        } else if (push() && (buf[0] = function_type_argument())) {
-            bi++;
-            if (cur + 2 < tc && tokens[cur]->type == OPERATOR && strcmp(tokens[cur]->value, ".") == 0
-            && tokens[cur + 1]->type == OPERATOR && strcmp(tokens[cur + 1]->value, ".") == 0
-            && tokens[cur + 2]->type == OPERATOR && strcmp(tokens[cur + 2]->value, ".") == 0) {
-                // case 2 variadic
-                cur += 3;
-                result->value = "...";
-            }
-
-            if (cur < tc && tokens[cur]->type != CLOSE_PAREN)
-                error("expected parenthesis");
+        if (tokens[++cur]->type == CLOSE_PAREN && ++cur)
+            return create_node(FUNCTION_TYPE_ARGUMENT_CLAUSE);
+        ASTNode *c;
+        if ((c = function_type_arugment_list())) {
+            ASTNode *result = create_node_with_child(FUNCTION_TYPE_ARGUMENT_CLAUSE, c);
+            // variadic
+            if (tokens[cur]->subtype == '*')
+                result->value = tokens[cur++]->value;
             
-            cur++;
+            if (tokens[cur++]->type != CLOSE_PAREN)
+                error("expected )");
 
-            set_children(result);
-            pop();
             return result;
-        } 
-        pop_set();
-        return NULL;
+        }
     }
     return NULL;
 }
 
 static ASTNode * function_type() {
-    if (push() && (buf[0] == function_type_argument_clause())) {
-        ASTNode *result = create_node(FUNCTION_TYPE);
-        bi++;
+    ASTNode *c;
+    if ((c == function_type_argument_clause())) {
+        ASTNode *result = create_node_with_child(FUNCTION_TYPE, c);
         if (tokens[cur]->type == THROWS) {
             result->value = "throws";
             cur++;
@@ -423,43 +426,31 @@ static ASTNode * function_type() {
             error("eof during function type");
         if (tokens[cur++]->type != RETURN_ANNOTATION)
             error("expected return annotation");
-        if (!(buf[bi++] = type()))
+        if (!add_child(type(), result))
             error("expected return type");
-
-        set_children(result);
-        pop();
         return result;
     }
-    pop_set();
     return NULL;
 }
 
 static ASTNode * array_type() {
-    if (push() && tokens[cur++]->type == OPEN_SQ_BRACE && (buf[0] = type()) && tokens[cur]->type == CLOSE_SQ_BRACE) {
-        cur++;
-        ASTNode *result = create_node(ARRAY_TYPE);
-        set_children(result);
-        pop();
-        return result;
-    }
+    ASTNode *c;
+    if (push() && tokens[cur++]->type == OPEN_SQ_BRACE && (c = type()) && tokens[cur++]->type == CLOSE_SQ_BRACE && pop())
+        return create_node_with_child(ARRAY_TYPE, c);
     pop_set();
     return NULL;
 }
 
 static ASTNode * dictionary_type() {
-    if (push() && tokens[cur++]->type == OPEN_SQ_BRACE && (buf[0] = type()) && tokens[cur]->type == COLON) {
-        cur++;
-        bi++;
-        if (!(buf[bi++] = type()))
+    ASTNode *c;
+    if (push() && tokens[cur++]->type == OPEN_SQ_BRACE && (c = type()) && tokens[cur++]->type == COLON && pop()) {
+        ASTNode *result = create_node_with_child(DICTIONARY_TYPE, c);
+        if (!add_child(type(), result))
             error("expected type after colon");
         if (cur >= tc)
             error("eof in dictioary type");
         if (tokens[cur++]->type != CLOSE_SQ_BRACE)
             error("expected close brace after type");
-        
-        ASTNode *result = create_node(DICTIONARY_TYPE);
-        set_children(result);
-        pop();
         return result;
     }
     pop_set();
@@ -467,29 +458,21 @@ static ASTNode * dictionary_type() {
 }
 
 static ASTNode * optional_type() {
-    if (push() && (buf[0] = type()) && cur < tc 
-    && tokens[cur]->type == OPERATOR 
-    && strcmp(tokens[cur++]->value, "!") == 0) {
-        ASTNode *result = create_node(OPTIONAL_TYPE);
-        bi++;
-        set_children(result);
-        return result;
-    }
+    ASTNode *c;
+    if (push() && (c = type()) && cur < tc 
+    && tokens[cur++]->subtype == '!' && pop()) 
+        return create_node_with_child(OPTIONAL_TYPE, c);
     pop_set();
     return NULL;    
 }
 
 static ASTNode * implicitly_unwrapped_optional_type() {
-    if (push() && (buf[0] = type()) && cur < tc 
-    && tokens[cur]->type == OPERATOR 
-    && strcmp(tokens[cur++]->value, "?") == 0) {
-        ASTNode *result = create_node(IMPLICITLY_UNWRAPPED_OPTIONAL_TYPE);
-        bi++;
-        set_children(result);
-        return result;
-    }
+    ASTNode *c;
+    if (push() && (c = type()) && cur < tc 
+    && tokens[cur++]->subtype == '?' && pop()) 
+        return create_node_with_child(IMPLICITLY_UNWRAPPED_OPTIONAL_TYPE, c);
     pop_set();
-    return NULL;
+    return NULL;    
 }
 
 static ASTNode * protocol_composition_continuation() {
@@ -501,14 +484,20 @@ static ASTNode * protocol_composition_type() {
 }
 
 static ASTNode * any_type() {
-    if (tokens[cur]->type == ANY) {
-        ASTNode *result = create_node(ANY_TYPE);
-        cur++;
-        return result;
-    }
+    if (tokens[cur]->type == ANY && ++cur) 
+        return create_node(ANY_TYPE);
+    return NULL;
 }
 
 static ASTNode * type_inheritance_list() {
+    ASTNode *c;
+    if ((c = type_identifier())) {
+        ASTNode *result = create_node_with_child(TYPE_INHERITANCE_LIST, c);
+        while(cur < tc && tokens[cur]->type == COMMA) 
+            if (++cur && !add_child(type_identifier(), result))
+                error("expected type identifier following comma");
+        return result;
+    }
     return NULL;
 }
 
@@ -517,29 +506,22 @@ static ASTNode * type_inheritance_clause() {
 }
 
 ASTNode * type() {
-    if ((buf[0] = function_type())
-    || (buf[0] = array_type())
-    || (buf[0] = dictionary_type())
-    || (buf[0] = type_identifier())
-    || (buf[0] = tuple_type())
-    || (buf[0] = optional_type())
-    || (buf[0] = implicitly_unwrapped_optional_type())
-    || (buf[0] = protocol_composition_type())
-    || (buf[0] = any_type())) {
-        ASTNode *result = create_node(TYPE);
-        bi++;
-        set_children(result);
+    ASTNode *c;
+    if ((c = function_type())
+    || (c = array_type())
+    || (c = dictionary_type())
+    || (c = type_identifier())
+    || (c = tuple_type())
+    || (c = optional_type())
+    || (c = implicitly_unwrapped_optional_type())
+    || (c = protocol_composition_type())
+    || (c = any_type()))
+        return create_node_with_child(TYPE, c);
+    if (push() && tokens[cur++]->type == OPEN_PAREN
+    && (c = type()) && tokens[cur++]->type == CLOSE_PAREN && pop()) {
+        ASTNode *result = create_node_with_child(TYPE, c);
+        result->value = "parenthesized";
         return result;
-    } else if (push() && tokens[cur]->type == OPEN_PAREN) {
-        // not sure if should throw error here or not..
-        if ((buf[0] = type()) && tokens[cur]->type == CLOSE_PAREN) {
-            bi++;
-            cur++;
-            ASTNode *result = create_node(TYPE);
-            result->value = "parenthesized";
-            set_children(result);
-            return result;
-        }
     }
     pop_set();
     return NULL;
@@ -560,28 +542,24 @@ static ASTNode * declaration_modifier() {
         case STATIC:
         case UNOWNED:
         case WEAK:
-            return create_node_withvalue(DECLARATION_MODIFIER, tokens[cur++]->value);
+            return create_node_with_value(DECLARATION_MODIFIER, tokens[cur++]->value);
             break;
         default:
             break;
     }
 
-    if ((buf[0] = access_level_modifier())) {
-        bi++;
-        ASTNode *result = create_node(DECLARATION_MODIFIER);
-        set_children(result);
-        return result;
-    }
-
+    ASTNode *c;
+    if ((c = access_level_modifier()))
+        return create_node_with_child(DECLARATION_MODIFIER, c);
     return NULL;
 }
 
 static ASTNode * declaration_modifiers() {
-    if ((buf[0] = declaration())) {
-        bi++;
-        ASTNode *result = create_node(DECLARATION_MODIFIERS);
-        while((buf[bi] = declaration())) bi++;
-        set_children(result);
+    ASTNode *c;
+    if ((c = declaration_modifier())) {
+        ASTNode *result = create_node_with_child(DECLARATION_MODIFIERS, c);
+        while(add_child(declaration_modifier(), result))
+        return result;
     }
     return NULL;
 }
@@ -598,36 +576,30 @@ static ASTNode * try_operator() {
 }
 
 static ASTNode * array_literal_item() {
-    if ((buf[0] = expression())) {
-        bi++;
-        ASTNode *result = create_node(ARRAY_LITERAL_ITEM);
-        set_children(result);
-        return result;
-    }
+    ASTNode *c;
+    if ((c = expression())) 
+        return create_node_with_child(ARRAY_LITERAL_ITEM, c);
     return NULL;
 }
 
 static ASTNode * array_literal_items() {
-    if ((buf[0] = array_literal_item())) {
-        bi++;
-        ASTNode *result = create_node(ARRAY_LITERAL_ITEMS);
-
-        while(cur < tc && tokens[cur]->type == COMMA) {
-            cur++;
-            if (!(buf[bi++] = array_literal_item()))
+    ASTNode *c;
+    if ((c = array_literal_item())) {
+        ASTNode *result = create_node_with_child(ARRAY_LITERAL_ITEMS, c);
+        while(cur < tc && tokens[cur]->type == COMMA && cur++) {
+            if (!add_child(array_literal_item(), result))
                 error("expected array literal item following comma");
         }
-
-        set_children(result);
         return result;
     }
     return NULL;
 }
 
+// here
 static ASTNode * array_literal() {
     if (push() && tokens[cur]->type == OPEN_SQ_BRACE) {
         cur++;
-        if ((buf[0] = array_literal_items())) {
+        if ((c = array_literal_items())) {
             bi++;
             ASTNode *result = create_node(ARRAY_LITERAL);
             if (tokens[cur++]->type != CLOSE_SQ_BRACE && pop())
@@ -644,7 +616,7 @@ static ASTNode * array_literal() {
 }
 
 static ASTNode * dictionary_literal_item() {
-    if (push() && (buf[0] = expression())) {
+    if (push() && (c = expression())) {
         if (tokens[cur++]->type == COLON && (buf[1] = expression()) && pop()) {
             ASTNode *result = create_node(DICTIONARY_LITERAL_ITEM);
             bi = 2;
@@ -657,7 +629,7 @@ static ASTNode * dictionary_literal_item() {
 }
 
 static ASTNode * dictionary_literal_items() {
-    if ((buf[0] = dictionary_literal_item())) {
+    if ((c = dictionary_literal_item())) {
         bi++;
         ASTNode *result = create_node(DICTIONARY_LITERAL_ITEMS);
 
@@ -676,7 +648,7 @@ static ASTNode * dictionary_literal_items() {
 static ASTNode * dictionary_literal() {
     if (push() && tokens[cur]->type == OPEN_SQ_BRACE) {
         cur++;
-        if ((buf[0] = dictionary_literal_items())) {
+        if ((c = dictionary_literal_items())) {
             bi++;
             ASTNode *result = create_node(ARRAY_LITERAL);
             if (tokens[cur++]->type != CLOSE_SQ_BRACE && pop())
@@ -696,9 +668,9 @@ static ASTNode * dictionary_literal() {
 }
 
 static ASTNode * literal_expression() {
-    if ((buf[0] = literal())
-    || (buf[0] = array_literal()) 
-    || (buf[0] = dictionary_literal())) {
+    if ((c = literal())
+    || (c = array_literal()) 
+    || (c = dictionary_literal())) {
         bi = 1;
         ASTNode *result = create_node(LITERAL_EXPRESSION);
         set_children(result);
@@ -708,7 +680,9 @@ static ASTNode * literal_expression() {
 }
 
 static ASTNode * self_initializer_expression() {
-    if (push() && tokens[cur++]->type == SELF && tokens[cur]->type == OPERATOR && strcmp(tokens[cur++]->value, ".") && tokens[cur++]->type == INIT && pop())
+    if (push() && tokens[cur++]->type == SELF 
+    && tokens[cur]->type == OPERATOR && strcmp(tokens[cur++]->value, ".") == 0
+    && tokens[cur++]->type == INIT && pop())
         return create_node(SELF_INITIALIZER_EXPRESSION);
     pop_set();
     return NULL;
@@ -723,21 +697,23 @@ static ASTNode * self_method_expression() {
 }
 
 static ASTNode * self_expression() {
-    if ((buf[0] = self_method_expression())
-    || (buf[0] = self_subscript_expression())
-    || (buf[0] = self_initializer_expression())) {
+    if ((c = self_method_expression())
+    || (c = self_subscript_expression())
+    || (c = self_initializer_expression())) {
         bi = 1;
         ASTNode *result = create_node(SELF_EXPRESSION);
         set_children(result);
         return result;
     }
     if (tokens[cur]->type == SELF)
-        return create_node_withvalue(SELF_EXPRESSION, tokens[cur++]->value);
+        return create_node_with_value(SELF_EXPRESSION, tokens[cur++]->value);
     return NULL;
 }
 
 static ASTNode * superclass_initializer_expression() {
-    if (push() && tokens[cur++]->type == SUPER && tokens[cur]->type == OPERATOR && strcmp(tokens[cur++]->value, ".") && tokens[cur++]->type == INIT && pop())
+    if (push() && tokens[cur++]->type == SUPER 
+    && tokens[cur]->type == OPERATOR && strcmp(tokens[cur++]->value, ".") == 0 
+    && tokens[cur++]->type == INIT && pop())
         return create_node(SUPERCLASS_INITIALIZER_EXPRESSION);
     pop_set();
     return NULL;
@@ -752,16 +728,16 @@ static ASTNode * superclass_method_expression() {
 }
 
 static ASTNode * superclass_expression() {
-    if ((buf[0] = superclass_method_expression())
-    || (buf[0] = superclass_subscript_expression())
-    || (buf[0] = supeclass_initializer_expression())) {
+    if ((c = superclass_method_expression())
+    || (c = superclass_subscript_expression())
+    || (c = superclass_initializer_expression())) {
         bi = 1;
         ASTNode *result = create_node(SUPERCLASS_EXPRESSION);
         set_children(result);
         return result;
     }
     if (tokens[cur]->type == SUPER)
-        return create_node_withvalue(SUPERCLASS_EXPRESSION, tokens[cur++]->value);
+        return create_node_with_value(SUPERCLASS_EXPRESSION, tokens[cur++]->value);
     return NULL;
 }
 
@@ -769,24 +745,80 @@ static ASTNode * superclass_expression() {
 
 static ASTNode * closure_parameter_name() {
     if (tokens[cur]->type == IDENTIFIER) 
-        return create_node_withvalue(CLOSURE_PARAMETER_NAME, tokens[cur++]->value);
+        return create_node_with_value(CLOSURE_PARAMETER_NAME, tokens[cur++]->value);
     return NULL;
 }
-
+// should really have subtypes for operator token or something better
 static ASTNode * closure_parameter() {
+    if ((c = closure_parameter_name())) {
+        ASTNode *result = create_node(CLOSURE_PARAMETER);
+        bi++;
+        if ((buf[bi] = type_annotation())) bi++;
+        set_children(result);
+        if (push() && cur + 2 < tc
+        && tokens[cur]->type == OPERATOR && strcmp(tokens[cur++]->value, ".") == 0
+        && tokens[cur]->type == OPERATOR && strcmp(tokens[cur++]->value, ".") == 0
+        && tokens[cur]->type == OPERATOR && strcmp(tokens[cur++]->value, ".") == 0 && pop()) {
+            // variadic
+            result->value = "...";
+            return result;
+        }
+        pop_set();
+        return result;
+    }
     return NULL;
 }
 
 static ASTNode * closure_parameter_list() {
+    ASTNode *c;
+    if ((c = closure_parameter())) {
+        ASTNode *result = create_node_with_child(CLOSURE_PARAMETER_LIST, c);
+        while(cur < tc && tokens[cur]->type == COMMA) 
+            if (++cur && !add_child(closure_parameter(), result))
+                error("expected closure parameter following comma");
+        return result;
+    }
+    return NULL;
+}
+
+static ASTNode * identifier_list() {
+    if (tokens[cur]->type == IDENTIFIER) {
+        while(cur < tc && tokens[cur]->type == COMMA) {
+            cur++;
+            if (tokens[cur++]->type != IDENTIFIER)
+                error("expected identifier following comma");
+        }
+        ASTNode *result = create_node(IDENTIFIER_LIST);
+        set_children(result);
+        return result;
+    }
     return NULL;
 }
 
 static ASTNode * closure_parameter_clause() {
+    if ((c = identifier_list())) {
+        ASTNode *result = create_node(CLOSURE_PARAMETER_CLAUSE);
+        bi++;
+        set_children(result);
+        return result;
+    } else if (push() && tokens[cur++]->type == OPEN_PAREN) {
+        if (tokens[cur++]->type == CLOSE_PAREN && pop()) 
+            return create_node(CLOSURE_PARAMETER_CLAUSE);
+        if ((c = closure_parameter_list())) {
+            bi++;
+            if (tokens[cur++]->type != CLOSE_PAREN && pop())
+                error("expected ) following closure parameter list");
+            ASTNode *result = create_node(CLOSURE_PARAMETER_CLAUSE);
+            set_children(result);
+            return result;
+        }
+    }
+    pop_set();
     return NULL;
 }
 
 static ASTNode * function_result() {
-    if ((buf[0] = type())) {
+    if ((c = type())) {
         bi++;
         ASTNode *result = create_node(FUNCTION_RESULT);
         set_children(result);
@@ -796,20 +828,101 @@ static ASTNode * function_result() {
 }
 
 static ASTNode * closure_signature() {
+    if (tokens[cur]->type == IN) {
+        cur++;
+        return create_node(CLOSURE_SIGNATURE); 
+    } else if ((c = closure_parameter_clause())) {
+        bi++;
+        if (tokens[cur]->type == IN) {
+            ASTNode *result = create_node_with_value(CLOSURE_SIGNATURE, tokens[cur++]->value);
+            set_children(result);
+            return result;
+        } else if ((buf[bi] = function_result())) {
+            if (tokens[cur++]->type != IN)
+                error("expected \"in\" keyword following type");
+            ASTNode *result = create_node(CLOSURE_SIGNATURE);
+            bi++;
+            set_children(result);
+            return result;
+        } else if (push() && tokens[cur++]->type == THROWS) {
+            ASTNode *result = create_node_with_value(CLOSURE_SIGNATURE, "throws");
+            if (tokens[cur]->type == IN) {
+                cur++;
+            } else if ((buf[bi] = function_result())) {
+                bi++;
+                if (tokens[cur++]->type != IN)
+                    error("expected \"in\" keyword following type");
+            }
+
+            pop();
+            set_children(result);
+            return result;
+        }
+        pop_set();
+    }
     return NULL;
 }
 
 static ASTNode * closure_expression() {
+    if (push() && tokens[cur++]->type == OPEN_CURL_BRACE) {
+        if (tokens[cur]->type == CLOSE_CURL_BRACE && pop()) {
+            cur++;
+            return create_node(CLOSURE_EXPRESSION);
+        } else if ((c = closure_signature()) && ++bi && pop()) {
+            ASTNode *result = create_node(CLOSURE_EXPRESSION);
+            if ((buf[bi] = statements())) bi++;
+            set_children(result);
+            return result;
+
+        } else if ((c = statements()) && ++bi && pop()) {
+            ASTNode *result = create_node(CLOSURE_EXPRESSION);
+            set_children(result);
+            return result;
+        }
+    }
+    pop_set();
     return NULL;
 }
 
 // other expressions
 
 static ASTNode * parenthesized_expression() {
+    if (push() && tokens[cur++]->type == OPEN_PAREN && ((c = expression()) && tokens[cur++]->type == CLOSE_PAREN) && pop()) {
+        ASTNode *result = create_node(PARENTHESIZED_EXPRESSION);
+        bi = 1;
+        set_children(result);
+        return result;
+    }
+    pop_set();
     return NULL;
 }
 
 static ASTNode * tuple_element() {
+    if ((c = expression())) {
+        ASTNode *result = create_node(TUPLE_ELEMENT);
+        set_children(result);
+        return result;
+    } else if (push() && tokens[cur]->type == IDENTIFIER) {
+        ASTNode *result = create_node_with_value(TUPLE_ELEMENT, tokens[cur++]->value);
+        if (tokens[cur++]->type == COLON && (c = expression()) && pop()) {
+            set_children(result);
+            return result;
+        }
+        free(result);
+    }
+    pop_set();
+    return NULL;
+}
+
+static ASTNode * tuple_element_list() {
+    ASTNode *c;
+    if ((c = tuple_element())) {
+        ASTNode *result = create_node_with_child(TUPLE_ELEMENT_LIST, c);
+        while(cur < tc && tokens[cur]->type == COMMA) 
+            if (++cur && !add_child(tuple_element(), result))
+                error("expected tuple element following comma");
+        return result;
+    }
     return NULL;
 }
 
@@ -819,30 +932,37 @@ static ASTNode * tuple_expression() {
 
 static ASTNode * wildcard_expression() {
     if (tokens[cur]->type == WILDCARD) 
-        return create_node_withvalue(WILDCARD_EXPRESSION, tokens[cur++]->value);
+        return create_node_with_value(WILDCARD_EXPRESSION, tokens[cur++]->value);
     return NULL;
 }
 
 static ASTNode * selector_expression() {
+    if (push() && tokens[cur++]->type == HASHTAG
+    && tokens[cur++]->type == SELECTOR && tokens[cur++]->type == OPEN_PAREN
+    && (c = expression()) && tokens[cur++]->type == CLOSE_PAREN && ++bi && pop()) {
+        ASTNode *result = create_node(SELECTOR_EXPRESSION);
+        set_children(result);
+        return result;
+    }
+    pop_set();
     return NULL;
 }
 
 static ASTNode * primary_expression() {
+    ASTNode *c;
     if (tokens[cur]->type == IDENTIFIER) {
-        ASTNode *result = create_node_withvalue(PRIMARY_EXPRESSION, tokens[cur++]->value);
-        if ((buf[0] = generic_argument_clause())) {
-            bi++;
-            set_children(result);
-        }
+        ASTNode *result = create_node_with_value(PRIMARY_EXPRESSION, tokens[cur++]->value);
+        add_child(generic_argument_clause(), result); // try it
         return result;
-    } else if ((buf[0] = literal_expression())
-    || (buf[0] = self_expression())
-    || (buf[0] = superclass_expression())
-    || (buf[0] = closure_expression())
-    || (buf[0] = parenthesized_expression())
-    || (buf[0] = tuple_expression())
-    || (buf[0] = wildcard_expression())
-    || (buf[0] = selector_expression()))
+    } else if ((c = literal_expression())
+    || (c = self_expression())
+    || (c = superclass_expression())
+    || (c = closure_expression())
+    || (c = parenthesized_expression())
+    || (c = tuple_expression())
+    || (c = wildcard_expression())
+    || (c = selector_expression())) 
+        return create_node_with_child(PRIMARY_EXPRESSION, c);
     return NULL;
 }
 
@@ -864,15 +984,47 @@ static ASTNode * trailing_closure() {
     return NULL;
 }
 
+// this might be wrong
 static ASTNode * function_call_argument() {
+    if ((c = expression()) && ++bi) {
+        ASTNode *result = create_node(FUNCTION_CALL_ARGUMENT);
+        set_children(result);
+        return result;
+    } else if (push() && tokens[cur++]->type == IDENTIFIER
+    && tokens[cur++]->type == COLON && (c = expression()) && ++bi && pop()) {
+        ASTNode *result = create_node(FUNCTION_CALL_ARGUMENT);
+        set_children(result);
+        return result;
+    }
+    pop_set();
     return NULL;
 }
 
-static ASTNode * function_argument_list() {
+static ASTNode * function_call_argument_list() {
+    ASTNode *c;
+    if ((c = function_call_argument())) {
+        ASTNode *result = create_node_with_child(FUNCTION_CALL_ARGUMENT_LIST, c);
+        while(cur < tc && tokens[cur]->type == COMMA) 
+            if (++cur && !add_child(function_call_argument(), result))
+                error("expected function call argument following comma");
+        return result;
+    }
     return NULL;
 }
 
-static ASTNode * function_argument_clause() {
+static ASTNode * function_call_argument_clause() {
+    if (push() && tokens[cur++]->type == OPEN_PAREN) {
+        if (tokens[cur++]->type == CLOSE_PAREN && pop())
+            return create_node(FUNCTION_CALL_ARGUMENT_CLAUSE);
+        else if ((c = function_call_argument_list()) && ++bi) {
+            if (tokens[cur++]->type != CLOSE_PAREN && pop())
+                error("expected ) following argument list");
+            ASTNode *result = create_node(FUNCTION_CALL_ARGUMENT_CLAUSE);
+            set_children(result);
+            return result;
+        }
+    }
+    pop_set();
     return NULL;
 }
 
@@ -900,10 +1052,43 @@ static ASTNode * optional_chaining_expression() {
 }
 
 static ASTNode * postfix_expression() {
+    if ((c = primary_expression())) {
+        ASTNode *result = create_node(POSTFIX_EXPRESSION);
+        bi++;
+        if ((buf[bi] = postfix_operator())) bi++;
+        set_children(result);
+        return result;
+    } else if ((c = function_call_expression())
+    || (c = initializer_expression())
+    || (c = explicit_member_expression())
+    || (c = subscript_expression())
+    || (c = forced_value_expression())
+    || (c = optional_chaining_expression())) {
+        ASTNode *result = create_node(POSTFIX_EXPRESSION);
+        bi++;
+        set_children(result);
+        return result;
+    }
     return NULL;
 }
 
 static ASTNode * prefix_expression() {
+    if ((c = prefix_operator())) {
+        bi++;
+        // maybe I should throw an error here?
+        // i will for now
+        if (!(buf[bi++] = postfix_expression()))
+            error("expexted expression following prefix operator");
+        
+        ASTNode *result = create_node(PREFIX_EXPRESSION);
+        set_children(result);
+        return result;
+    } else if ((c = postfix_expression())) {
+        bi++;
+        ASTNode *result = create_node(PREFIX_EXPRESSION);
+        set_children(result);
+        return result;
+    }
     return NULL;
 }
 
@@ -928,15 +1113,45 @@ static ASTNode * binary_expression() {
 }
 
 static ASTNode * binary_expressions() {
+    if ((c = binary_expression()) && ++bi) {
+        while((buf[bi] = binary_expression())) bi++;
+        ASTNode *result = create_node(BINARY_EXPRESSIONS);
+        set_children(result);
+        return result;
+    }
     return NULL;
 }
 
-static ASTNode * expression() {
-
+ASTNode * expression() {
+    if ((c = try_operator())) {
+        bi++;
+        if (!(buf[bi++] = prefix_expression()))
+            error("expected expression following try oeprator");
+        ASTNode *result = create_node(EXPRESSION);
+        if ((buf[bi] = binary_expressions())) bi++;
+        set_children(result);
+        puts("got expression");
+        return result;
+    } else if ((c = prefix_expression())) {
+        ASTNode *result = create_node(EXPRESSION);
+        puts("got expression");
+        bi++;
+        if ((buf[bi] = binary_expressions())) bi++;
+        set_children(result);
+        return result;
+    }
     return NULL;
 }
 
 static ASTNode * expression_list() {
+    ASTNode *c;
+    if ((c = expression())) {
+        ASTNode *result = create_node_with_child(EXPRESSION_LIST, c);
+        while(cur < tc && tokens[cur]->type == COMMA) 
+            if (++cur && !add_child(expression(), result))
+                error("expected expression following comma");
+        return result;
+    }
     return NULL;
 }
 
@@ -954,11 +1169,19 @@ static ASTNode * while_statement() {
     return NULL;
 }
 
-static ASTNode * condition_list() {
+static ASTNode * condition() {
     return NULL;
 }
 
-static ASTNode * condition() {
+static ASTNode * condition_list() {
+    ASTNode *c;
+    if ((c = condition())) {
+        ASTNode *result = create_node_with_child(CONDITION_LIST, c);
+        while(cur < tc && tokens[cur]->type == COMMA) 
+            if (++cur && !add_child(condition(), result))
+                error("expected condition following comma");
+        return result;
+    }
     return NULL;
 }
 
@@ -1011,6 +1234,14 @@ static ASTNode * case_item() {
 }
 
 static ASTNode * case_item_list() {
+    ASTNode *c;
+    if ((c = case_item())) {
+        ASTNode *result = create_node_with_child(CASE_ITEM_LIST, c);
+        while(cur < tc && tokens[cur]->type == COMMA) 
+            if (++cur && !add_child(case_item(), result))
+                error("expected case item following comma");
+        return result;
+    }
     return NULL;
 }
 
@@ -1085,31 +1316,36 @@ static ASTNode * catch_pattern() {
 }
 
 static ASTNode * catch_pattern_list() {
-    return NULL;
-}
-
-ASTNode * statement() {
-    if ((buf[0] = expression())
-    || (buf[0] = declaration())
-    || (buf[0] = loop_statement())
-    || (buf[0] = branch_statement())
-    || (buf[0] = labeled_statement())
-    || (buf[0] = control_transfer_statement())
-    || (buf[0] = do_statement())) {
-        bi++;
-        ASTNode *result = create_node(STATEMENT);
-        set_children(result);
+    ASTNode *c;
+    if ((c = catch_pattern())) {
+        ASTNode *result = create_node_with_child(CATCH_PATTERN_LIST, c);
+        while(cur < tc && tokens[cur]->type == COMMA) 
+            if (++cur && !add_child(catch_pattern(), result))
+                error("expected catch pattern following comma");
         return result;
     }
     return NULL;
 }
 
-static ASTNode * statements() {
-    if ((buf[0] = statement())) {
-        ASTNode *result = create_node(STATEMENTS);
-        bi++;
-        while((buf[bi] = statement())) bi++;
-        set_children(result);
+static ASTNode * statement() {
+    ASTNode *c;
+    if ((c = expression())
+    || (c = declaration())
+    || (c = loop_statement())
+    || (c = branch_statement())
+    || (c = labeled_statement())
+    || (c = control_transfer_statement())
+    || (c = do_statement())) 
+        return create_node_with_child(STATEMENT, c);
+    return NULL;
+}
+
+ASTNode * statements() {
+    ASTNode *c;
+    if ((c = statement())) {
+        puts("getting statements");
+        ASTNode *result = create_node_with_child(STATEMENTS, c);
+        while(add_child(statement(), result));
         return result;
     }
     return NULL;
@@ -1126,37 +1362,34 @@ static ASTNode * constant_declaration() {
     return NULL;
 }
 
+static ASTNode * pattern() {
+    return NULL;
+}
+
+static ASTNode * initializer() {
+    ASTNode *c;
+    if ((c = expression())) 
+        return create_node_with_child(INITIALIZER, c);
+    return NULL;
+}
+
 static ASTNode * pattern_initializer() {
-    if ((buf[0] = pattern())) {
-        bi++;
-        ASTNode *result = create_node(PATTERN_INITIALIZER);
-        if ((buf[bi] = initializer())) bi++;
-        set_children(result);
+    ASTNode *c;
+    if ((c = pattern())) {
+        ASTNode *result = create_node_with_child(PATTERN_INITIALIZER, c);
+        add_child(initializer(), result);
         return result;
     }
     return NULL;
 }
 
 static ASTNode * pattern_initializer_list() {
-    if ((buf[0] = pattern_initializer())) {
-        bi++;
-        ASTNode *result = create_node(PATTERN_INITIALIZER);
-        while(cur < tc && tokens[cur]->type == COMMA) {
-            cur++;
-            if (!(buf[bi++] = pattern_initializer()))
+    ASTNode *c;
+    if ((c = pattern_initializer())) {
+        ASTNode *result = create_node_with_child(PATTERN_INITIALIZER_LIST, c);
+        while(cur < tc && tokens[cur]->type == COMMA) 
+            if (++cur && !add_child(pattern_initializer(), result))
                 error("expected pattern initializer following comma");
-        }
-        set_children(result);
-        return result;
-    }
-    return NULL;
-}
-
-static ASTNode * initializer() {
-    if ((buf[0] = expression())) {
-        bi++;
-        ASTNode *result = create_node(INITIALIZER);
-        set_children(result);
         return result;
     }
     return NULL;
@@ -1212,7 +1445,7 @@ static ASTNode * function_head() {
 
 static ASTNode * function_name() {
     if (tokens[cur]->type == IDENTIFIER)
-        return create_node_withvalue(FUNCTION_NAME, tokens[cur++]->value);
+        return create_node_with_value(FUNCTION_NAME, tokens[cur++]->value);
     return NULL;
 }
 
@@ -1226,6 +1459,14 @@ static ASTNode * parameter() {
 }
 
 static ASTNode * parameter_list() {
+    ASTNode *c;
+    if ((c = parameter())) {
+        ASTNode *result = create_node_with_child(PARAMETER_LIST, c);
+        while(cur < tc && tokens[cur]->type == COMMA) 
+            if (++cur && !add_child(parameter(), result))
+                error("expected parameter following comma");
+        return result;
+    }
     return NULL;
 }
 
@@ -1278,53 +1519,41 @@ static ASTNode * precedence_group_declaration() {
 }
 
 ASTNode * declaration() {
-    if ((buf[0] = constant_declaration())
-    || (buf[0] = variable_declaration())
-    || (buf[0] = typedef_declaration())
-    || (buf[0] = function_declaration())
-    || (buf[0] = enum_declaration())
-    || (buf[0] = struct_declaration())
-    || (buf[0] = class_declaration())
-    || (buf[0] = protocol_declaration())
-    || (buf[0] = initializer_declaration())
-    || (buf[0] = deinitializer_declaration())
-    || (buf[0] = extension_declaration())
-    || (buf[0] = subscript_declaration())
-    || (buf[0] = operator_declaration())
-    || (buf[0] = precedence_group_declaration())) {
-        ASTNode *result = create_node(DECLARATION);
-        set_children(result);
-        return result;
-    }
+    ASTNode *c;
+    if ((c = constant_declaration())
+    || (c = variable_declaration())
+    || (c = typedef_declaration())
+    || (c = function_declaration())
+    || (c = enum_declaration())
+    || (c = struct_declaration())
+    || (c = class_declaration())
+    || (c = protocol_declaration())
+    || (c = initializer_declaration())
+    || (c = deinitializer_declaration())
+    || (c = extension_declaration())
+    || (c = subscript_declaration())
+    || (c = operator_declaration())
+    || (c = precedence_group_declaration())) 
+        return create_node_with_child(DECLARATION, c);
     return NULL;
 }
 
 static ASTNode * declarations() {
-    if ((buf[0] = declaration())) {
-        ASTNode *result = create_node(DECLARATIONS);
-        bi++;
-        while((buf[bi] = declaration())) bi++;
-        set_children(result);
+    ASTNode *c;
+    if ((c = declaration())) {
+        ASTNode *result = create_node_with_child(DECLARATIONS, c);
+        while(add_child(declaration(), result));
         return result;
     }
     return NULL;
 }
 
-
-
-static ASTNode * access_level_modifier() {
-    if (tokens[cur]->type == PRIVATE || tokens[cur]->type == PUBLIC)
-        return create_node_withvalue(ACCESS_LEVEL_MODIFIER, tokens[cur++]->value);
-    return NULL;
-}
-
 static ASTNode * top_level_declaration() {
-    ASTNode *result = create_node(TOP_LEVEL_DECLARATION);
-    if ((buf[0] = statements())) {
-        bi++;
-        set_children(result);
-    }
-    return result;
+    puts("inside tld");
+    ASTNode *c;
+    if ((c = statements())) 
+        return create_node_with_child(TOP_LEVEL_DECLARATION, c);
+    return NULL;
 }
 
 ASTNode * parse(Token **tks, size_t token_count) {

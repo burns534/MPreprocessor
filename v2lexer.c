@@ -382,38 +382,64 @@ static inline bool operator_character(char c) {
     || c == '~' || c == '?';
 }
 
-static Token * operator() {
-    if (operator_character(fs[cursor]) ||  fs[cursor] == '.') {
-        Token *result = create_token(OPERATOR);
-        if (operator_character(fs[cursor])) {
-            // check for return annotation
-            if (cursor + 1 < fs_l && fs[cursor] == '-' && fs[cursor + 1] == '>') {
-                result->type = RETURN_ANNOTATION;
-                cursor += 2;
-                return result;
-            }
+// static Token * operator() {
+//     if (operator_character(fs[cursor]) ||  fs[cursor] == '.') {
+//         Token *result = create_token(OPERATOR);
+//         if (operator_character(fs[cursor])) {
+//             // check for return annotation
+//             if (cursor + 1 < fs_l && fs[cursor] == '-' && fs[cursor + 1] == '>') {
+//                 result->type = RETURN_ANNOTATION;
+//                 cursor += 2;
+//                 return result;
+//             }
 
-            while(lbi < OPERATOR_MAX && cursor < fs_l && operator_character(fs[cursor])) {
-                lbuf[lbi++] = fs[cursor++];
-            }
-            lbuf[lbi] = 0;
-            lbi = 0;
+//             while(lbi < OPERATOR_MAX && cursor < fs_l && operator_character(fs[cursor])) {
+//                 lbuf[lbi++] = fs[cursor++];
+//             }
+//             lbuf[lbi] = 0;
+//             lbi = 0;
 
-            set_value(lbuf, result);
-            return result;
-        } else {
-            while(lbi < OPERATOR_MAX && cursor < fs_l && (operator_character(fs[cursor]) || fs[cursor] == '.')) {
-                lbuf[lbi++] = fs[cursor++];
-            }
-
-            lbuf[lbi] = 0;
-            lbi = 0;
+//             set_value(lbuf, result);
+//             return result;
+//         } else {
+//             while(lbi < OPERATOR_MAX && cursor < fs_l && (operator_character(fs[cursor]) || fs[cursor] == '.')) {
+//                 lbuf[lbi++] = fs[cursor++];
+//             }
             
-            set_value(lbuf, result);
+//             if (lbi == 1) result->subtype = '.';
+//             else if (lbi == 3) result->subtype = '*'; // variadic
+//             lbuf[lbi] = 0;
+//             lbi = 0;
+            
+//             set_value(lbuf, result);
+//             return result;
+//         }
+//     }
+//     return NULL;
+// }
+
+static Token * operator() {
+    if (operator_character(fs[cursor]) || fs[cursor] == '.') {
+        Token *result = create_token(OPERATOR);
+
+        //check for return annotation
+        if (cursor + 1 < fs_l && fs[cursor] == '-' && fs[cursor + 1] == '>') {
+            result->type = RETURN_ANNOTATION;
+            cursor += 2;
             return result;
         }
+
+        while(lbi < OPERATOR_MAX && cursor < fs_l && (operator_character(fs[cursor]) || fs[cursor] == '.'))
+            lbuf[lbi++] = fs[cursor++];
+        
+        if (lbi == 1 && lbuf[0] == '.') result->subtype = '.';
+        else if (lbi == 3 && lbuf[0] == '.' && lbuf[1] == '.' && lbuf[2] == '.') result->subtype = '*'; // variadic
+        lbuf[lbi] = 0;
+        lbi = 0;
+
+        set_value(lbuf, result);
+        return result;
     }
-    return NULL;
 }
 
 // make sure I add logic for import statements and include statements

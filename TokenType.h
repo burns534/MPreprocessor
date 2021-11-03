@@ -80,11 +80,11 @@ typedef enum {
     UNOWNED,
     PRECEDENCEGROUP,
 
-    // used in patterns
-    WILDCARD,
-
     // keywords beginning in hash symbol
     SELECTOR,
+
+    // used in patterns
+    WILDCARD,
 
     // types
     FLOAT,
@@ -198,9 +198,9 @@ static char * tt_string_table[] = {
     "UNOWNED",
     "PRECEDENCEGROUP",
 
-    "WILDCARD",
-
     "SELECTOR",
+
+    "WILDCARD",
 
     "FLOAT",
     "INT",
@@ -306,12 +306,14 @@ static char *keyword_table[] = {
     "postfix",
     "prefix",
     "unowned",
-    "precedencegroup"
+    "precedencegroup",
+
+    "selector"
 };
 
 typedef struct {
     TokenType type;
-    char *value, *filename;
+    char *value, *filename, subtype;
     size_t line_number, character;
 } Token;
 
