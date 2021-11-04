@@ -119,6 +119,8 @@ typedef enum {
     // literals
     DECIMAL_LITERAL,
     BINARY_LITERAL,
+    INTEGER_LITERAL,
+    FLOATING_POINT_LITERAL,
     STATIC_STRING_LITERAL,
     INTERPOLATED_STRING_LITERAL,
 
@@ -232,6 +234,8 @@ static char * tt_string_table[] = {
 
     "DECIMAL_LITERAL",
     "BINARY_LITERAL",
+    "INTEGER_LITERAL",
+    "FLOATING_POINT_LITERAL",
     "STATIC_STRING_LITERAL",
     "INTERPOLATED_STRING_LITERAL",
 
@@ -311,11 +315,23 @@ static char *keyword_table[] = {
     "selector"
 };
 
+typedef enum {
+    POST, PRE, INF
+} Fix;
+
 typedef struct {
     TokenType type;
     char *value, *filename, subtype;
     size_t line_number, character;
+    Fix fix;
 } Token;
+
+static inline void set_value(char *v, Token *t) {
+    size_t len = strlen(v);
+    t->value = malloc(len + 1);
+    strcpy(t->value, v);
+    t->value[len] = 0;
+}
 
 static char * token_type_to_string(TokenType t) {
     return tt_string_table[t];

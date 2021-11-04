@@ -8,6 +8,7 @@
         "compiler.h": "c",
         "stdlib.h": "c",
         "iterator": "c",
-        "tokentype.h": "c"
+        "tokentype.h": "c",
+        "__locale": "c"
     }
 }

@@ -42,10 +42,10 @@ int main (int argc, char **argv) {
     if (fs) {
         lex(fs, fs_l, tokens, &token_count, current_filename);
 
-        // for (int i = 0; i < token_count; i++)
-        //     print_token(tokens[i]);
+        for (int i = 0; i < token_count; i++)
+            print_token(tokens[i]);
 
-        ASTNode *ast = parse();
+        ASTNode *ast = parse(tokens, token_count);
         print_tree(ast);
         
     }

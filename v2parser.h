@@ -20,8 +20,10 @@ ASTNode * type();
 ASTNode * declaration();
 ASTNode * statements();
 ASTNode * expression();
+ASTNode * if_statement();
+ASTNode * pattern();
 
-ASTNode * parse();
+ASTNode * parse(Token **tks, size_t token_count);
 
 #endif
 #pragma once

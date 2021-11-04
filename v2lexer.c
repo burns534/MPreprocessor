@@ -3,7 +3,7 @@
 static Token **tokens;
 static size_t tab_spacing = 4, cursor = 0, token_count = 0, current_char = 0, current_line = 1, fs_l = 0, lbi = 0; // literal buffer index
 static char *fs, *current_filename, lbuf[LITERAL_BUFFER];
-
+static bool just_got_whitespace = false;
 static void error(char *fmt, ...) {
     
     int ret;
@@ -42,19 +42,16 @@ static Token * create_token(TokenType type) {
     return result;
 }
 
-static inline void set_value(char *v, Token *t) {
-    size_t len = strlen(v);
-    t->value = malloc(len + 1);
-    strcpy(t->value, v);
-    t->value[len] = 0;
-}
-
 static inline bool decimal_digit(char c) {
     return c >= '0' && c <= '9';
 }
 
+static inline bool alpha(char c) {
+    return c <= 'z' && c >= 'a' || c <= 'Z' && c >= 'A';
+}
+
 static inline bool identifier_head(char c) {
-    return c <= 'z' && c >= 'a' || c <= 'Z' && c >= 'A' || c == '_';
+    return alpha(c) || c == '_';
 }
 
 static inline bool identifier_character(char c) {
@@ -179,7 +176,7 @@ static bool whitespace_item() {
 static bool whitespace() {
     if (whitespace_item()) {
         while(cursor < fs_l && whitespace_item());
-        return true;
+        return just_got_whitespace = true;
     }
     return false;
 }
@@ -247,7 +244,7 @@ static Token * identifier() {
         return implicit_parameter_name();
     }
 }
-
+// FIXME - leading zeroes should be error
 // will skip leading zeroes for decimal literal also
 static Token * decimal_literal() {
     if (decimal_digit(fs[cursor])) {
@@ -277,6 +274,7 @@ static Token * decimal_literal() {
     }
     return NULL;
 }
+
 // must call this first!
 static Token * binary_literal() {
     // printf("binary literal called with %c%c\n", fs[cursor], fs[cursor + 1]);
@@ -285,7 +283,6 @@ static Token * binary_literal() {
         Token *result = create_token(BINARY_LITERAL);
         if (!binary_digit(fs[cursor + 2]))
             error("expected binary digit following 0b. instead found %c", fs[cursor + 2]);
-        
         cursor += 2;
 // TODO - probably skip leading zeroes later
         bool skipping_zeroes = true;
@@ -312,6 +309,30 @@ static Token * binary_literal() {
         set_value(lbuf, result);
         return result;
     }
+    return NULL;
+}
+// needs to be changed if I want native bigint support
+#define INTEGER_LITERAL_LENGTH 64
+
+// this is hacky
+static Token * integer_literal() {
+    Token *t;
+    if ((t = binary_literal())) {
+        t->type = INTEGER_LITERAL;
+        char buf[INTEGER_LITERAL_LENGTH];
+        snprintf(buf, INTEGER_LITERAL_LENGTH, "%d", (int) strtol(t->value, NULL, 2));
+        t->value = realloc(t->value, strlen(buf) + 1);
+        strcpy(t->value, buf);
+        return t;
+        // conversion logic
+    } else if ((t = decimal_literal())) {
+        t->type = INTEGER_LITERAL;
+        return t;
+    }
+    return NULL;
+} 
+
+static Token * floating_point_literal() {
     return NULL;
 }
 
@@ -364,7 +385,8 @@ static Token * keyword() {
     while(cc < KEYWORD_MAX && cursor + cc < fs_l && isalpha(fs[cursor + cc])) {
         buf[cc] = fs[cursor + cc];
         cc++;
-        if ((type = is_keyword(buf)) != -1) {
+        // !alpha prevents premature keyword grabbing
+        if ((type = is_keyword(buf)) != -1 && !alpha(fs[cursor + cc])) {
             Token *result = create_token(type + 1);
             cursor += cc;
             current_char += cc;
@@ -382,46 +404,9 @@ static inline bool operator_character(char c) {
     || c == '~' || c == '?';
 }
 
-// static Token * operator() {
-//     if (operator_character(fs[cursor]) ||  fs[cursor] == '.') {
-//         Token *result = create_token(OPERATOR);
-//         if (operator_character(fs[cursor])) {
-//             // check for return annotation
-//             if (cursor + 1 < fs_l && fs[cursor] == '-' && fs[cursor + 1] == '>') {
-//                 result->type = RETURN_ANNOTATION;
-//                 cursor += 2;
-//                 return result;
-//             }
-
-//             while(lbi < OPERATOR_MAX && cursor < fs_l && operator_character(fs[cursor])) {
-//                 lbuf[lbi++] = fs[cursor++];
-//             }
-//             lbuf[lbi] = 0;
-//             lbi = 0;
-
-//             set_value(lbuf, result);
-//             return result;
-//         } else {
-//             while(lbi < OPERATOR_MAX && cursor < fs_l && (operator_character(fs[cursor]) || fs[cursor] == '.')) {
-//                 lbuf[lbi++] = fs[cursor++];
-//             }
-            
-//             if (lbi == 1) result->subtype = '.';
-//             else if (lbi == 3) result->subtype = '*'; // variadic
-//             lbuf[lbi] = 0;
-//             lbi = 0;
-            
-//             set_value(lbuf, result);
-//             return result;
-//         }
-//     }
-//     return NULL;
-// }
-
 static Token * operator() {
     if (operator_character(fs[cursor]) || fs[cursor] == '.') {
         Token *result = create_token(OPERATOR);
-
         //check for return annotation
         if (cursor + 1 < fs_l && fs[cursor] == '-' && fs[cursor + 1] == '>') {
             result->type = RETURN_ANNOTATION;
@@ -431,15 +416,29 @@ static Token * operator() {
 
         while(lbi < OPERATOR_MAX && cursor < fs_l && (operator_character(fs[cursor]) || fs[cursor] == '.'))
             lbuf[lbi++] = fs[cursor++];
-        
+        bool ws = just_got_whitespace;
+        if (whitespace()) { // implies invalid to have two operators separated by white space only
+            if (ws) result->fix = INF;
+            else result->fix = POST;
+        } else if (ws)
+            result->fix = PRE;
+    // subtypes
         if (lbi == 1 && lbuf[0] == '.') result->subtype = '.';
         else if (lbi == 3 && lbuf[0] == '.' && lbuf[1] == '.' && lbuf[2] == '.') result->subtype = '*'; // variadic
+        else if (lbuf[lbi - 1] == '.') result->fix = POST;
+        else if (lbi == 1 && operator_character(lbuf[0])) {
+            printf("subtype: %c\n", lbuf[0]);
+            result->subtype = lbuf[0];
+        }
+        
+
         lbuf[lbi] = 0;
         lbi = 0;
 
         set_value(lbuf, result);
         return result;
     }
+    return NULL;
 }
 
 // make sure I add logic for import statements and include statements
@@ -450,11 +449,10 @@ void lex(char *filestring, size_t length, Token **tks, size_t *tkl, char *filena
     current_filename = filename;
     Token *current_token = NULL;
     while (cursor < fs_l) {
-        if (whitespace())
-            continue;
-        // binary literal must come first
-        else if ((current_token = binary_literal())
-        || (current_token = decimal_literal())
+        // printf("current character: %c\n", fs[cursor]);
+        if (whitespace()) continue;
+        else if ((current_token = integer_literal()) // must be called before operator for '-'
+        || (current_token = floating_point_literal())
         || (current_token = string_literal())
         || (current_token = operator())
         || (current_token = keyword()) // must be before identifier
@@ -462,8 +460,9 @@ void lex(char *filestring, size_t length, Token **tks, size_t *tkl, char *filena
             tokens[token_count++] = current_token;
             // printf("got token at line %lu ", current_line);
             // print_token(current_token);
+            just_got_whitespace = false;
             continue;
-        } 
+        }
         switch(fs[cursor]) {
             case '(':
                 tokens[token_count++] = create_token(OPEN_PAREN);
