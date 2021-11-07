@@ -46,6 +46,13 @@ int main (int argc, char **argv) {
             print_token(tokens[i]);
 
         ASTNode *ast = parse(tokens, token_count);
+        // ASTNode *statements = ast->children[0];
+        // for (int i = 0; i < statements->child_count; i++) {
+        //     if (statements->children[i])
+        //         printf("not null: %s\n", node_type_to_string(statements->children[i]->type));
+        //     else
+        //         puts("it's null...");
+        // }
         print_tree(ast);
         
     }

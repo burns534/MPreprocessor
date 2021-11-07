@@ -9,6 +9,15 @@
         "stdlib.h": "c",
         "iterator": "c",
         "tokentype.h": "c",
-        "__locale": "c"
+        "__locale": "c",
+        "__string": "c",
+        "algorithm": "c",
+        "functional": "c",
+        "locale": "c",
+        "ctime": "c",
+        "new": "c",
+        "type_traits": "c",
+        "__bit_reference": "c",
+        "__config": "c"
     }
 }

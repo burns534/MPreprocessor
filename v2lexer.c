@@ -8,7 +8,6 @@ static void error(char *fmt, ...) {
     
     int ret;
 
-    size_t len = strlen(fmt);
     char buffer[500], *message;
 
     sprintf(buffer, "%s:%lu:%lu: \x1b[31;1merror\x1b[0m : ", current_filename, current_line, current_char);
@@ -42,6 +41,27 @@ static Token * create_token(TokenType type) {
     return result;
 }
 
+static Token * create_token_with_value(TokenType type, char *value) {
+    Token *result = malloc(sizeof(Token));
+    result->type = type;
+    result->line_number = current_line;
+    result->character = current_char;
+    result->filename = current_filename;
+    result->value = value;
+    return result;
+}
+
+static Token * create_token_with_value_and_subtype(TokenType type, char *value, char subtype) {
+    Token *result = malloc(sizeof(Token));
+    result->type = type;
+    result->line_number = current_line;
+    result->character = current_char;
+    result->filename = current_filename;
+    result->value = value;
+    result->subtype = subtype;
+    return result;
+}
+
 static inline bool decimal_digit(char c) {
     return c >= '0' && c <= '9';
 }
@@ -70,9 +90,6 @@ static inline bool binary_literal_character(char c) {
     return c == '0' || c == '1' || c == '_';
 }
 
-static inline bool comment_text_item(char c) {
-    return c != '\n' && c != '\r'; // lf or cr
-}
 // this could be wrong since tab probably skips more than 1 character..
 static bool inline_space() {
     if (fs[cursor] == ' ') {
@@ -181,6 +198,7 @@ static bool whitespace() {
     return false;
 }
 
+// this is probably technically wrong...
 static Token * implicit_parameter_name() {
     if (cursor + 1 < fs_l && fs[cursor] == '$') {
         Token *result = create_token(IDENTIFIER);
@@ -198,6 +216,7 @@ static Token * implicit_parameter_name() {
 }
 
 static Token * identifier() {
+    puts("identifier");
     if (identifier_head(fs[cursor]) || fs[cursor] == '`') {
         Token *result = create_token(IDENTIFIER);
 
@@ -246,7 +265,10 @@ static Token * identifier() {
 }
 // FIXME - leading zeroes should be error
 // will skip leading zeroes for decimal literal also
+
+// dont skip leading zeroes if the number IS zero lol
 static Token * decimal_literal() {
+    puts("decimal literal");
     if (decimal_digit(fs[cursor])) {
         Token *result = create_token(DECIMAL_LITERAL);
         bool skipping_zeroes = true;
@@ -265,7 +287,9 @@ static Token * decimal_literal() {
             lbuf[lbi++] = fs[cursor++];
             current_char++;
         } while(cursor < fs_l && decimal_literal_character(fs[cursor]));
-
+        // in case we skipped 0
+        if (lbi == 0) 
+            lbuf[0] = '0';
         lbuf[lbi] = 0; // null terminate
         lbi = 0; // restore index
 
@@ -277,6 +301,7 @@ static Token * decimal_literal() {
 
 // must call this first!
 static Token * binary_literal() {
+    puts("binary literal");
     // printf("binary literal called with %c%c\n", fs[cursor], fs[cursor + 1]);
     if (cursor + 2 >= fs_l) return false;
     if (fs[cursor] == '0' && fs[cursor + 1] == 'b') {
@@ -316,6 +341,7 @@ static Token * binary_literal() {
 
 // this is hacky
 static Token * integer_literal() {
+    puts("integer literal");
     Token *t;
     if ((t = binary_literal())) {
         t->type = INTEGER_LITERAL;
@@ -336,10 +362,10 @@ static Token * floating_point_literal() {
     return NULL;
 }
 
-static bool escaped_character(char c) {
-    return c == 0 || c == '\\' || c == '\t' || c == '\v' || c == '\f'
-    || c == '\n' || c == '\r' || c == '\'' || c == '\"';
-}
+// static bool escaped_character(char c) {
+//     return c == 0 || c == '\\' || c == '\t' || c == '\v' || c == '\f'
+//     || c == '\n' || c == '\r' || c == '\'' || c == '\"';
+// }
 
 // multiline string will be made with escape char
 // or c-style string concatenation
@@ -347,6 +373,7 @@ static bool escaped_character(char c) {
 
 // interpolated string literal will be handled in the parser later
 static Token * string_literal() {
+    puts("string literal");
     if (cursor + 1 >= fs_l) return NULL;
     if (fs[cursor] == '"') {
         Token *result = create_token(STATIC_STRING_LITERAL);
@@ -380,65 +407,186 @@ static Token * string_literal() {
 }
 // could be shared with identifier
 static Token * keyword() {
-    int cc = 0, type;
-    char buf[KEYWORD_MAX + 1];
-    while(cc < KEYWORD_MAX && cursor + cc < fs_l && isalpha(fs[cursor + cc])) {
-        buf[cc] = fs[cursor + cc];
-        cc++;
+    // puts("keyword called");
+    int type;
+    while(lbi < KEYWORD_MAX && cursor + lbi < fs_l && isalpha(fs[cursor + lbi])) {
+        lbuf[lbi] = fs[cursor + lbi];
+        lbuf[lbi++ + 1] = 0;
+        // puts(lbuf);
         // !alpha prevents premature keyword grabbing
-        if ((type = is_keyword(buf)) != -1 && !alpha(fs[cursor + cc])) {
+        if ((type = is_keyword(lbuf)) != -1 && !identifier_character(fs[cursor + lbi])) {
             Token *result = create_token(type + 1);
-            cursor += cc;
-            current_char += cc;
-            set_value(buf, result);
+            cursor += lbi;
+            current_char += lbi;
+            lbuf[lbi] = 0;
+            lbi = 0;
+            set_value(lbuf, result);
+            // printf("\n-------------\ngot keyword! here's the token\n");
+            // print_token(result);
             return result;
         }
     }
+    lbuf[lbi] = 0;
+    lbi = 0;
     return NULL;
 }
 
-static inline bool operator_character(char c) {
-    return c == '/' || c == '=' || c == '-' || c == '+'
-    || c == '!' || c == '*' || c == '%' || c == '<'
-    || c == '>' || c == '&' || c == '|' || c == '^'
-    || c == '~' || c == '?';
-}
+// static inline bool operator_character(char c) {
+//     return c == '/' || c == '=' || c == '-' || c == '+'
+//     || c == '!' || c == '*' || c == '%' || c == '<'
+//     || c == '>' || c == '&' || c == '|' || c == '^'
+//     || c == '~' || c == '?';
+// }
 
-static Token * operator() {
-    if (operator_character(fs[cursor]) || fs[cursor] == '.') {
-        Token *result = create_token(OPERATOR);
-        //check for return annotation
-        if (cursor + 1 < fs_l && fs[cursor] == '-' && fs[cursor + 1] == '>') {
-            result->type = RETURN_ANNOTATION;
-            cursor += 2;
-            return result;
-        }
+// allowed operators now
+// static Token * operator() {
+//     puts("operator");
+//     if (operator_character(fs[cursor]) || fs[cursor] == '.') {
+//         Token *result = create_token_with_value_and_subtype(OPERATOR, );
+//         //check for return annotation
+//         if (cursor + 1 < fs_l && fs[cursor] == '-' && fs[cursor + 1] == '>') {
+//             result->type = RETURN_ANNOTATION;
+//             cursor += 2;
+//             return result;
+//         }
 
-        while(lbi < OPERATOR_MAX && cursor < fs_l && (operator_character(fs[cursor]) || fs[cursor] == '.'))
-            lbuf[lbi++] = fs[cursor++];
-        bool ws = just_got_whitespace;
-        if (whitespace()) { // implies invalid to have two operators separated by white space only
-            if (ws) result->fix = INF;
-            else result->fix = POST;
-        } else if (ws)
-            result->fix = PRE;
-    // subtypes
-        if (lbi == 1 && lbuf[0] == '.') result->subtype = '.';
-        else if (lbi == 3 && lbuf[0] == '.' && lbuf[1] == '.' && lbuf[2] == '.') result->subtype = '*'; // variadic
-        else if (lbuf[lbi - 1] == '.') result->fix = POST;
-        else if (lbi == 1 && operator_character(lbuf[0])) {
-            printf("subtype: %c\n", lbuf[0]);
-            result->subtype = lbuf[0];
-        }
+//         while(lbi < OPERATOR_MAX && cursor < fs_l && (operator_character(fs[cursor]) || fs[cursor] == '.'))
+//             lbuf[lbi++] = fs[cursor++];
+//         bool ws = just_got_whitespace;
+//         if (whitespace()) { // implies invalid to have two operators separated by white space only
+//             if (ws) result->fix = INF;
+//             else result->fix = POST;
+//         } else if (ws)
+//             result->fix = PRE;
+//     // subtypes
+//         if (lbi == 1 && lbuf[0] == '.') result->subtype = '.';
+//         else if (lbi == 3 && lbuf[0] == '.' && lbuf[1] == '.' && lbuf[2] == '.') result->subtype = ')'; // variadic
+//         else if (lbuf[lbi - 1] == '.') result->fix = POST;
+//         else if (lbi == 1 && operator_character(lbuf[0])) {
+//             printf("subtype: %c\n", lbuf[0]);
+//             result->subtype = lbuf[0];
+//         }
         
 
-        lbuf[lbi] = 0;
-        lbi = 0;
+//         lbuf[lbi] = 0;
+//         lbi = 0;
 
-        set_value(lbuf, result);
-        return result;
+//         set_value(lbuf, result);
+//         return result;
+//     }
+//     return NULL;
+// }
+
+/* operators are the following
+
+%, &, -, +, /, !, ?, *, ^, |, ||, &&, ++, --, 
+*=, %=, /=, +=, -=, <, >, <=, >=, ==, ==, ^=, !=, ??
+
+*/
+static Token *operator() {
+    Token *t;
+    switch (fs[cursor]) {
+        case '+':
+            if (cursor + 1 < fs_l && fs[cursor + 1] == '+' && cursor++)
+                t = create_token_with_value(OPERATOR, "++");
+            else if (cursor + 1 < fs_l && fs[cursor + 1] == '=' && cursor++)
+                t = create_token_with_value(OPERATOR, "+=");
+            else
+                t = create_token_with_value_and_subtype(OPERATOR, "+", '+');
+            break;
+        case '-':
+            if (cursor + 1 < fs_l && fs[cursor + 1] == '-' && cursor++)
+                t = create_token_with_value(OPERATOR, "--");
+            else if (cursor + 1 < fs_l && fs[cursor + 1] == '=' && cursor++)
+                t = create_token_with_value(OPERATOR, "+=");
+            else if (cursor + 1 < fs_l && fs[cursor + 1] == '>' && cursor++)
+                t = create_token_with_value(RETURN_ANNOTATION, "->");
+            else
+                t = create_token_with_value_and_subtype(OPERATOR, "-", '-');
+            break;
+        case '*':
+            if (cursor + 1 < fs_l && fs[cursor + 1] == '=' && cursor++)
+                t = create_token_with_value(OPERATOR, "*=");
+            else
+                t = create_token_with_value_and_subtype(OPERATOR, "*", '*');
+            break;
+        case '/':
+            if (cursor + 1 < fs_l && fs[cursor + 1] == '=' && cursor++)
+                t = create_token_with_value(OPERATOR, "/=");
+            else
+                 t = create_token_with_value_and_subtype(OPERATOR, "/", '/');
+            break;
+        case '%':
+            if (cursor + 1 < fs_l && fs[cursor + 1] == '=' && cursor++)
+                t = create_token_with_value(OPERATOR, "%=");
+            else
+                t = create_token_with_value_and_subtype(OPERATOR, "%", '%');
+            break;
+        case '^':
+            if (cursor + 1 < fs_l && fs[cursor + 1] == '=' && cursor++)
+                t = create_token_with_value(OPERATOR, "^=");
+            else
+                t = create_token_with_value_and_subtype(OPERATOR, "^", '^');
+            break;
+        case '!':
+            if (cursor + 1 < fs_l && fs[cursor + 1] == '=' && cursor++)
+                t = create_token_with_value(OPERATOR, "!=");
+            else
+                t = create_token_with_value_and_subtype(OPERATOR, "!", '!');
+            break;
+        case '&':
+            if (cursor + 1 < fs_l && fs[cursor + 1] == '&' && cursor++)
+                t = create_token_with_value(OPERATOR, "&&");
+            else if (cursor + 1 < fs_l && fs[cursor + 1] == '=' && cursor++)
+                t = create_token_with_value(OPERATOR, "&=");
+            else
+                t = create_token_with_value_and_subtype(OPERATOR, "&", '&');
+            break;
+        case '|':
+            if (cursor + 1 < fs_l && fs[cursor + 1] == '|' && cursor++)
+                t = create_token_with_value(OPERATOR, "||");
+            else if (cursor + 1 < fs_l && fs[cursor + 1] == '=' && cursor++)
+                t = create_token_with_value(OPERATOR, "|=");
+            else
+                t = create_token_with_value_and_subtype(OPERATOR, "|", '|');
+            break;
+        case '<':
+            if (cursor + 1 < fs_l && fs[cursor + 1] == '=' && cursor++)
+                t = create_token_with_value(OPERATOR, "<=");
+            else
+                t = create_token_with_value_and_subtype(OPERATOR, "<", '<');
+            break;
+        case '>':
+            if (cursor + 1 < fs_l && fs[cursor + 1] == '=' && cursor++)
+                t = create_token_with_value(OPERATOR, ">=");
+            else
+                t = create_token_with_value_and_subtype(OPERATOR, ">", '>');
+            break;
+        case '=':
+            if (cursor + 1 < fs_l && fs[cursor + 1] == '=' && cursor++)
+                t = create_token_with_value(OPERATOR, "==");
+            else
+                t = create_token_with_value_and_subtype(OPERATOR, "=", '=');
+            break;
+        case '?':
+            if (cursor + 1 < fs_l && fs[cursor + 1] == '?' && cursor++)
+                t = create_token_with_value_and_subtype(OPERATOR, "??", 'N'); // nil coalesce operator
+            else
+                t = create_token_with_value_and_subtype(OPERATOR, "?", '?');
+            break;
+        default:
+            return NULL;
     }
-    return NULL;
+    cursor++;
+    bool ws = just_got_whitespace;
+    if (whitespace()) { // implies invalid to have two operators separated by white space only
+        if (ws) t->fix = INF;
+        else t->fix = POST;
+    } else if (ws)
+        t->fix = PRE;
+    else
+        t->fix = INF;
+    return t;
 }
 
 // make sure I add logic for import statements and include statements
@@ -465,41 +613,45 @@ void lex(char *filestring, size_t length, Token **tks, size_t *tkl, char *filena
         }
         switch(fs[cursor]) {
             case '(':
-                tokens[token_count++] = create_token(OPEN_PAREN);
+                tokens[token_count++] = create_token_with_value(OPEN_PAREN, "(");
                 break;
             case ')':
-                tokens[token_count++] = create_token(CLOSE_PAREN);
+                tokens[token_count++] = create_token_with_value(CLOSE_PAREN, ")");
                 break;
             case '{':
-                tokens[token_count++] = create_token(OPEN_CURL_BRACE);
+                tokens[token_count++] = create_token_with_value(OPEN_CURL_BRACE, "{");
                 break;
             case '}':
-                tokens[token_count++] = create_token(CLOSE_CURL_BRACE);
+                tokens[token_count++] = create_token_with_value(CLOSE_CURL_BRACE, "}");
                 break;
             case '[':
-                tokens[token_count++] = create_token(OPEN_SQ_BRACE);
+                tokens[token_count++] = create_token_with_value(OPEN_SQ_BRACE, "]");
                 break;
             case ']':
-                tokens[token_count++] = create_token(CLOSE_SQ_BRACE);
+                tokens[token_count++] = create_token_with_value(CLOSE_SQ_BRACE, "]");
                 break;
             case ',':
-                tokens[token_count++] = create_token(COMMA);
+                tokens[token_count++] = create_token_with_value(COMMA, ",");
                 break;
             case ':':
-                tokens[token_count++] = create_token(COLON);
+                tokens[token_count++] = create_token_with_value(COLON, ":");
                 break;
             case ';':
-                tokens[token_count++] = create_token(SEMICOLON);
+                tokens[token_count++] = create_token_with_value(SEMICOLON, ";");
                 break;
             case '#':
-                tokens[token_count++] = create_token(HASHTAG);
+                tokens[token_count++] = create_token_with_value(HASHTAG, "#");
                 break;
             case '_':
-                tokens[token_count++] = create_token(WILDCARD);
+                tokens[token_count++] = create_token_with_value(WILDCARD, "_");
+                break;
+            case '.':
+                tokens[token_count++] = create_token_with_value(DOT, ".");
                 break;
             default:
                 error("unrecognized character in file %c", fs[cursor]);
         }
+        just_got_whitespace = false;
         cursor++;
     }
 

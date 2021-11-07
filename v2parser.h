@@ -19,6 +19,7 @@ void print_tree(ASTNode *root);
 ASTNode * type();
 ASTNode * declaration();
 ASTNode * statements();
+ASTNode * postfix_expression();
 ASTNode * expression();
 ASTNode * if_statement();
 ASTNode * pattern();
