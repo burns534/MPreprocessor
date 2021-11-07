@@ -1025,18 +1025,22 @@ static ASTNode * trailing_closures() {
 
 // missing syntax check
 static ASTNode * function_call_argument() {
+    if (cur + 2 >= tc) return NULL;
+    printf("function call argument %s\n", tokens[cur]->value);
     ASTNode *c;
-    if ((c = expression())) 
+    if (tokens[cur]->type == IDENTIFIER && tokens[cur + 1]->type == COLON) {
+        printf("cursor: %lu\n", cur);
+        ASTNode *result = create_node_with_value(FUNCTION_CALL_ARGUMENT, tokens[cur]->value);
+        if ((cur += 2) && !add_child(expression(), result))
+            error("expected expression following argument label");
+        return result;      
+    } else if ((c = expression())) 
         return create_node_with_child(FUNCTION_CALL_ARGUMENT, c);
-    if (cur >= tc + 2) return NULL;
-    if (push() && tokens[cur++]->type == IDENTIFIER
-    && tokens[cur++]->type == COLON && (c = expression()) && pop()) 
-        return create_node_with_child(FUNCTION_CALL_ARGUMENT, c);
-    pop_set();
     return NULL;
 }
 
 static ASTNode * function_call_argument_list() {
+    printf("function call argument list %s\n", tokens[cur]->value);
     ASTNode *c;
     if ((c = function_call_argument())) {
         ASTNode *result = create_node_with_child(FUNCTION_CALL_ARGUMENT_LIST, c);
@@ -1055,6 +1059,7 @@ static ASTNode * function_call_argument_clause() {
             return create_node(FUNCTION_CALL_ARGUMENT_CLAUSE);
         ASTNode *c;
         if ((c = function_call_argument_list())) {
+            puts("out of function_call_argument_list");
             if (cur >= tc) return NULL;
             if (pop() && tokens[cur++]->type != CLOSE_PAREN)
                 error("expected ) following argument list");
@@ -1270,6 +1275,7 @@ static ASTNode * binary_expressions() {
 }
 // missing syntax check
 ASTNode * expression() {
+    printf("cursor: %lu\n", cur);
     printf("expression %s\n", tokens[cur]->value);
     ASTNode *c;
     if ((c = try_operator())) {
@@ -1994,6 +2000,30 @@ static ASTNode * generic_parameter_clause() {
     return NULL;
 }
 
+static ASTNode * same_type_requirement() {
+    return NULL;
+}
+
+static ASTNode * conformance_requirement() {
+    return NULL;
+}
+
+static ASTNode * conformance_requirements() {
+    return NULL;
+}
+
+static ASTNode * requirement() {
+    return NULL;
+}
+
+static ASTNode * requirement_list() {
+    return NULL;
+}
+
+static ASTNode * generic_where_clause() {
+    return NULL;
+}
+
 // function dec
 
 static ASTNode * function_head() {
@@ -2084,11 +2114,11 @@ static ASTNode * function_declaration() {
         ASTNode *result = create_node_with_child(FUNCTION_DECLARATION, c);
         if (!add_child(function_name(), result))
             error("expected function name");
-        // add_child(generic_parameter_clause(), result);
+        add_child(generic_parameter_clause(), result);
         if (!add_child(function_signature(), result))
             error("expected function signature");
         
-        // add_child(generic_where_clause(), result);
+        add_child(generic_where_clause(), result);
         add_child(function_body(), result); // optional
         return result;
     }
@@ -2185,7 +2215,51 @@ static ASTNode * protocol_declaration() {
     return NULL;
 }
 
+static ASTNode * initializer_body() {
+    ASTNode *c;
+    if ((c = code_block()))
+        return create_node_with_child(INITIALIZER_BODY, c);
+    return NULL;
+}
+
+static ASTNode * initializer_head() {
+    if (tokens[cur]->type == INIT && cur++) {
+        ASTNode *result = create_node(INITIALIZER_HEAD);
+        if (tokens[cur]->subtype == '!' && cur++)
+            result->value = "!";
+        else if (tokens[cur]->subtype == '?' && cur++)
+            result->value = "?";
+        return result;
+    }
+    ASTNode *c;
+    if (push() && (c = declaration_modifiers()) && tokens[cur++]->type == INIT ) {
+        ASTNode *result = create_node_with_child(INITIALIZER_HEAD, c);
+        if (tokens[cur]->subtype == '!' && cur++)
+            result->value = "!";
+        else if (tokens[cur]->subtype == '?' && cur++)
+            result->value = "?";
+        return result;
+    }
+    pop_set();
+    return NULL;
+}
+
 static ASTNode * initializer_declaration() {
+    ASTNode *c;
+    if ((c = initializer_head())) {
+        ASTNode *result = create_node_with_child(INITIALIZER_DECLARATION, c);
+        add_child(generic_parameter_clause(), result);
+        if (!add_child(parameter_clause(), result))
+            error("expected paramter clause following init");
+        if (tokens[cur]->type == THROWS && cur++)
+            result->value = "throws";
+        else if (tokens[cur]->type == RETHROWS && cur++)
+            result->value = "rethrows";
+        add_child(generic_where_clause(), result);
+        if (!add_child(initializer_body(), result))
+            error("expected initializer body");
+        return result;
+    }
     return NULL;
 }
 
